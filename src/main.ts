@@ -3,6 +3,7 @@ import './styles/app.css'
 
 import { createBus } from './core/bus'
 import { HBF } from './core/hbf-spec'
+import { lang, onLang, setLang, t } from './core/i18n'
 import { Registry } from './core/registry'
 import { P, onThemeMode, setThemeMode, themeMode, themed, toggleThemeMode } from './core/theme'
 import type { ComponentDef, FocusSpec, SceneState, WorldContext, WorldModule } from './core/types'
@@ -10,6 +11,7 @@ import { clamp, damp } from './core/util'
 import { createCameraRig } from './engine/camera'
 import { createLabels } from './engine/labels'
 import { createPicker } from './engine/picker'
+import { createBlockTip } from './ui/block-tip'
 import { createRenderer } from './engine/renderer'
 import { MODELS } from './sim/models'
 import type { ModelId } from './sim/models'
@@ -21,9 +23,13 @@ import { TRACES } from './sim/workload'
 import type { WorkloadId } from './sim/workload'
 import { el } from './ui/dom'
 import { createHud } from './ui/hud'
+import type { Hud } from './ui/hud'
 import { createInspector } from './ui/panel'
+import type { Inspector } from './ui/panel'
 import { SPEEDS, createSimPanel } from './ui/sim-panel'
-import type { Scenario } from './ui/sim-panel'
+import type { Scenario, SimPanel } from './ui/sim-panel'
+import { createTour } from './ui/tour'
+import type { Tour } from './ui/tour'
 import { createActivity } from './world/activity'
 import { createGpu } from './world/gpu'
 import { createStacks } from './world/hbf-stack'
@@ -39,22 +45,46 @@ import { createSky } from './world/sky'
  *
  * Order: renderer -> camera -> world -> simulator -> labels and picking ->
  * UI -> loop. The world reads SceneState and the simulator; the UI edits
- * SceneState and the scenario and talks over the bus.
+ * SceneState and the scenario and talks over the bus. The UI is rebuilt from
+ * that state whenever the language changes.
  *
  * URL parameters (for review and screenshots):
- *   theme=day|night   view=home|overview|stack   stack=0..5   open=0..1
- *   die=0..15         scale=1..12   labels=0|1   select=<id>  focus=<id>
+ *   lang=en|zh   theme=day|night   view=home|overview|stack   stack=0..5
+ *   open=0..1    die=0..15   scale=1..12   labels=0|1   select=<id>  focus=<id>
  *   model=deepseek-v3|qwen3-235b|hunyuan3   workload=toC|toB|coding|thinking
  *   policy=hbflex|arrival   width=1|4|16   load=<x suggested>   speed=<sim s per s>
  *   play=0|1   skip=<hours simulated before the first frame>   blocks=state|wear
- *   settle=1 jumps animations to their targets
+ *   tour=<stop 1..8>   settle=1 jumps animations to their targets
  * ==========================================================================*/
+
+/**
+ * A named view, pulled back on narrow or portrait screens so the package still
+ * fits: the views are framed for a 16:10 window, and a narrower window sees
+ * less horizontally at the same distance.
+ */
+function fitted(view: { target: readonly number[]; pos: readonly number[] }): { target: [number, number, number]; pos: [number, number, number] } {
+  const aspect = window.innerWidth / Math.max(1, window.innerHeight)
+  const k = Math.min(2.3, Math.max(1, Math.sqrt(1.6 / aspect)))
+  const [tx, ty, tz] = view.target
+  const [px, py, pz] = view.pos
+  return { target: [tx, ty, tz], pos: [tx + (px - tx) * k, ty + (py - ty) * k, tz + (pz - tz) * k] }
+}
+const goHome = (rig: { setView(t: readonly number[], p: readonly number[]): void }) => {
+  const v = fitted(VIEW.home)
+  rig.setView(v.target, v.pos)
+}
+const goOverview = (rig: { setView(t: readonly number[], p: readonly number[]): void }) => {
+  const v = fitted(VIEW.overview)
+  rig.setView(v.target, v.pos)
+}
 
 const params = new URLSearchParams(location.search)
 /** Screenshot mode: animations jump to their targets. */
 const settleMode = params.get('settle') === '1'
 const bootFill = document.getElementById('boot-fill')
 const bootStatus = document.getElementById('boot-status')
+document.documentElement.lang = lang() === 'zh' ? 'zh-CN' : 'en'
+document.title = t('doc.title')
 
 function progress(pct: number, label: string): Promise<void> {
   if (bootFill) bootFill.style.width = `${pct}%`
@@ -80,6 +110,8 @@ function pick<T extends string | number>(name: string, allowed: readonly T[], fa
   return hit ?? fallback
 }
 
+const BASE_PARTS = new Set(['base', 'phy', 'ctrl', 'sram', 'landing', 'debug'])
+
 async function boot(): Promise<void> {
   const canvasRoot = document.getElementById('canvas-root')!
   const labelsRoot = document.getElementById('labels-root')!
@@ -87,13 +119,15 @@ async function boot(): Promise<void> {
 
   const probe = document.createElement('canvas').getContext('webgl2')
   if (!probe) {
-    if (bootStatus) bootStatus.textContent = 'This browser has no WebGL2. Try a recent Chrome, Edge, Firefox or Safari.'
+    if (bootStatus) bootStatus.textContent = t('boot.noWebgl')
     return
   }
   probe.getExtension('WEBGL_lose_context')?.loseContext()
 
   const themeParam = params.get('theme')
-  if (themeParam === 'day' || themeParam === 'night') setThemeMode(themeParam)
+  // a link's mode applies to this visit only; it does not overwrite the visitor's choice
+  if (themeParam === 'day' || themeParam === 'light') setThemeMode('day', false)
+  else if (themeParam === 'night' || themeParam === 'dark') setThemeMode('night', false)
   document.documentElement.dataset.theme = themeMode()
 
   const N = HBF.stacksPerGpu
@@ -122,13 +156,13 @@ async function boot(): Promise<void> {
   const bus = createBus()
   const registry = new Registry()
 
-  await progress(10, 'Renderer')
+  await progress(10, t('boot.renderer'))
   const gfx = createRenderer(canvasRoot)
   const { scene, camera } = gfx
 
-  await progress(20, 'Camera')
+  await progress(20, t('boot.camera'))
   const rig = createCameraRig(camera, gfx.dom)
-  camera.position.set(...VIEW.home.pos)
+  camera.position.set(...fitted(VIEW.home).pos)
   rig.controls.target.set(...VIEW.home.target)
   rig.controls.update()
 
@@ -140,7 +174,7 @@ async function boot(): Promise<void> {
     register: (def: ComponentDef) => registry.register(def),
   }
 
-  await progress(30, 'Sky')
+  await progress(30, t('boot.sky'))
   scene.add(createSky())
 
   const modules: WorldModule[] = []
@@ -150,22 +184,22 @@ async function boot(): Promise<void> {
     return m
   }
 
-  await progress(42, 'Package and interposer')
+  await progress(42, t('boot.package'))
   const pkg = add(createPackage(ctx))
 
-  await progress(55, 'GPU die')
+  await progress(55, t('boot.gpu'))
   const gpu = add(createGpu(ctx))
 
-  await progress(66, 'NAND block atlas (1.57 M blocks)')
+  await progress(66, t('boot.atlas'))
   const occupancy = createOccupancyAtlas()
   const activity = createActivity()
   const simView = createSimView(occupancy)
 
-  await progress(76, 'HBF stacks')
+  await progress(76, t('boot.stacks'))
   const stacks = add(createStacks(ctx, occupancy, activity))
 
   /* ---- simulator ------------------------------------------------------------- */
-  await progress(84, 'Serving simulator')
+  await progress(84, t('boot.sim'))
   const modelIds = Object.keys(MODELS) as ModelId[]
   const workloadIds = Object.keys(TRACES) as WorkloadId[]
   const policyIds = Object.keys(POLICIES) as PolicyId[]
@@ -176,15 +210,14 @@ async function boot(): Promise<void> {
     width: pick<InterleaveWidth>('width', WIDTHS, 1),
     loadScale: params.has('load') ? clamp(Number(params.get('load')) || 1, 0.25, 1.5) : 1,
   }
-  const speeds = SPEEDS.map((s) => s.value)
   let speed = params.has('speed') ? Number(params.get('speed')) || 600 : 600
-  if (!speeds.includes(speed)) speeds.push(speed)
+  if (!(SPEEDS as readonly number[]).includes(speed)) speed = 600
   let playing = params.get('play') !== '0'
   let load = 0
   let sim: Sim = makeSim(scenario)
 
   function makeSim(s: Scenario): Sim {
-    load = Math.min(1.5, suggestedLoad(s.model, s.workload) * s.loadScale)
+    load = Math.min(1.5, suggestedLoad(s.model, s.workload, s.width) * s.loadScale)
     return createSim({ model: s.model, workload: s.workload, policy: s.policy, width: s.width, load, seed: 7 })
   }
 
@@ -195,19 +228,43 @@ async function boot(): Promise<void> {
 
   const skipHours = params.has('skip') ? clamp(Number(params.get('skip')) || 0, 0, 72) : 0
   if (skipHours > 0) {
-    await progress(88, `Simulating ${skipHours} h of serving`)
+    await progress(88, t('boot.skip', { h: skipHours }))
     sim.run(skipHours * 3600)
     simView.repaintAll(sim.store)
   }
 
-  await progress(92, 'Labels')
+  await progress(92, t('boot.labels'))
   const labels = createLabels(labelsRoot, registry, bus)
-  const picker = createPicker({ dom: gfx.dom, camera, registry, bus })
+  // the NAND block under the cursor, once the camera is close enough for blocks to matter
+  const blockTip = createBlockTip(document.body)
+  const picker = createPicker({
+    dom: gfx.dom,
+    camera,
+    registry,
+    bus,
+    onHoverHit: (hit, x, y) => {
+      const b = hit && hit.distance < 600 ? stacks.blockAt(hit) : null
+      if (!b) return blockTip.hide()
+      const store = sim.store
+      const w = store.width
+      const perStack = HBF.diesPerStack / w
+      // the die's interleave domain, as in domainDies(): dies k, k + 16/w, ...
+      const sb = (b.stack * perStack + (b.die % perStack)) * BLOCKS + b.block
+      const st = store.state[sb]
+      blockTip.show(x, y, {
+        ...b,
+        state: st === SbState.Weights ? 'weights' : st === SbState.Free ? 'free' : st === SbState.Open ? 'open' : 'closed',
+        written: store.written[sb],
+        valid: store.valid[sb],
+        erases: store.erase[sb],
+        width: w,
+      })
+    },
+  })
   scene.add(picker.group)
   gfx.refreshEnvironment()
 
-  /* ---- interaction --------------------------------------------------------- */
-  const inspector = createInspector(hudRoot, registry, bus)
+  /* ---- camera framing ------------------------------------------------------- */
   let selected: string | null = null
   const box = new THREE.Box3()
   const center = new THREE.Vector3()
@@ -235,8 +292,46 @@ async function boot(): Promise<void> {
       dir = [-site.inward * 0.7, 0.62, 0.62]
     } else if (def.district === 'gpu') {
       dir = [0.3, 1, 0.55]
+    } else if (def.district === 'package') {
+      dir = [0.5, 0.9, 0.7]
+      distance = clamp(r * 1.4 + 60, 60, 2400)
     }
     return { target: [center.x, center.y, center.z], distance, dir }
+  }
+
+  function flyToId(id: string): void {
+    const def = registry.get(id)
+    if (!def) return
+    // let a die or the base finish moving before framing it
+    const wait = def.die !== undefined || BASE_PARTS.has(def.doc) ? 650 : 0
+    if (settleMode) rig.flyTo(focusFor(def), 0.001)
+    else window.setTimeout(() => rig.flyTo(focusFor(def)), wait)
+  }
+
+  /* ---- selection --------------------------------------------------------------- */
+  /** Open the stack and slide out the die, or lift the cores off a base part, as selecting `def` does. */
+  function stage(def: ComponentDef | undefined): void {
+    if (def?.stack !== undefined) state.focusStack = def.stack
+    if (def?.die !== undefined && def.stack !== undefined) {
+      const s = def.stack
+      if (state.explodeTarget[s] < 0.3) state.explodeTarget[s] = 0.45
+      for (let k = 0; k < N; k++) if (k !== s) state.liftedDieTarget[k] = -1
+      state.liftedDieTarget[s] = def.die
+    } else if (def?.stack !== undefined && BASE_PARTS.has(def.doc)) {
+      // uncover the base die: lift the whole core-die stack off it
+      const s = def.stack
+      for (let k = 0; k < N; k++) state.liftedDieTarget[k] = k === s ? LIFT_BASE : -1
+    } else {
+      for (let k = 0; k < N; k++) state.liftedDieTarget[k] = -1
+    }
+    if (settleMode) {
+      for (let k = 0; k < N; k++) {
+        state.explode[k] = state.explodeTarget[k]
+        state.liftedDie[k] = state.liftedDieTarget[k]
+        state.lift[k] = state.liftedDie[k] !== -1 ? 1 : 0
+      }
+      stacks.update(0, state)
+    }
   }
 
   function select(id: string | null): void {
@@ -244,41 +339,37 @@ async function boot(): Promise<void> {
     picker.setSelected(id)
     labels.setHighlight(id)
     inspector.show(id)
-    panel.setMetricsVisible(!id)
+    hud.setRightVisible(!id)
     // keep the subject clear of the inspector on wide screens
     rig.setRightInset(id && window.innerWidth > 900 ? Math.min(400, window.innerWidth * 0.3) : 0, settleMode)
     const def = id ? registry.get(id) : undefined
     stacks.setSelectedDie(def?.stack ?? -1, def?.die ?? -1)
-    if (def?.stack !== undefined) state.focusStack = def.stack
-    const baseParts = new Set(['base', 'phy', 'ctrl', 'sram', 'landing', 'debug'])
-    if (def?.die !== undefined && def.stack !== undefined) {
-      const s = def.stack
-      if (state.explodeTarget[s] < 0.3) state.explodeTarget[s] = 0.45
-      for (let k = 0; k < N; k++) if (k !== s) state.liftedDieTarget[k] = -1
-      state.liftedDieTarget[s] = def.die
-    } else if (def?.stack !== undefined && baseParts.has(def.doc)) {
-      // uncover the base die: lift the whole core-die stack off it
-      const s = def.stack
-      for (let k = 0; k < N; k++) state.liftedDieTarget[k] = k === s ? LIFT_BASE : -1
-    } else {
-      for (let k = 0; k < N; k++) state.liftedDieTarget[k] = -1
-    }
+    stage(def)
     hud.sync()
+  }
+
+  /** Frame a part as a selection would, but keep its notes closed so the Live panel stays in view. */
+  function peek(id: string): void {
+    select(null)
+    const def = registry.get(id)
+    if (!def) return
+    stage(def)
+    rig.setRightInset(window.innerWidth > 900 ? 330 : 0, settleMode)
+    hud.sync()
+    flyToId(id)
   }
 
   bus.on('select', ({ id }) => select(id))
   bus.on('hover', ({ id }) => picker.setHovered(id))
   bus.on('focus', ({ id }) => {
-    const def = id ? registry.get(id) : undefined
-    if (!def) return
+    if (!id || !registry.get(id)) return
     if (selected !== id) select(id)
-    // let a lifted die finish moving before framing it
-    window.setTimeout(() => rig.flyTo(focusFor(def)), def.die !== undefined ? 650 : 0)
+    flyToId(id)
   })
   bus.on('scene:changed', () => hud.sync())
 
   /** Live block statistics of one die (its interleave domain) or a whole stack. */
-  inspector.setExtra((def) => {
+  function blockStats(def: ComponentDef): HTMLElement | null {
     if (def.stack === undefined || (def.doc !== 'coreDie' && def.doc !== 'stack')) return null
     const store = sim.store
     const w = store.width
@@ -288,7 +379,6 @@ async function boot(): Promise<void> {
         ? [def.stack * perStack + (def.die % perStack)]
         : Array.from({ length: perStack }, (_, k) => def.stack! * perStack + k)
     let weights = 0
-    let free = 0
     let open = 0
     let validPages = 0
     let invalidPages = 0
@@ -306,19 +396,20 @@ async function boot(): Promise<void> {
         kvBlocks++
         eraseSum += store.erase[sb]
         eraseMax = Math.max(eraseMax, store.erase[sb])
-        if (st === SbState.Free) free++
-        else if (st === SbState.Open) open++
+        if (st === SbState.Open) open++
         validPages += store.valid[sb]
         invalidPages += store.written[sb] - store.valid[sb]
+        // a closed block's unwritten tail cannot be used until the block is erased
+        if (st === SbState.Closed) invalidPages += 512 - store.written[sb]
       }
     }
     const total = (weights + kvBlocks) * 512
     const freePages = total - weights * 512 - validPages - invalidPages
     const rows: [string, number, keyof typeof P][] = [
-      ['Weights', weights * 512, 'weights'],
-      ['Valid KV', validPages, 'kv'],
-      ['Invalid', invalidPages, 'invalid'],
-      ['Free', freePages, 'free'],
+      [t('occ.weights'), weights * 512, 'weights'],
+      [t('occ.valid'), validPages, 'kv'],
+      [t('occ.invalid'), invalidPages, 'invalid'],
+      [t('occ.free'), freePages, 'free'],
     ]
     const bar = el('div', { class: 'occ__bar' })
     const list = el('div', { class: 'occ__list' })
@@ -329,42 +420,27 @@ async function boot(): Promise<void> {
       bar.append(seg)
       list.append(el('span', {}, `${label} ${((100 * count) / total).toFixed(1)}%`))
     }
-    const scope = def.die !== undefined ? (w > 1 ? `this die and the ${w - 1} it is interleaved with` : 'this die') : 'this stack'
+    const heading =
+      def.die !== undefined ? (w > 1 ? t('occ.pages.dieN', { n: w - 1 }) : t('occ.pages.die')) : t('occ.pages.stack')
     return el('section', { class: 'occ' },
-      el('h3', {}, `Pages on ${scope}`),
+      el('h3', {}, heading),
       bar,
       list,
-      el('p', { class: 'occ__sub' }, `${open} open block rows · erases per block: mean ${(eraseSum / Math.max(1, kvBlocks)).toFixed(1)}, max ${eraseMax}`),
-      el('p', { class: 'occ__note' }, `Simulated: ${MODELS[scenario.model].name}, ${TRACES[scenario.workload].name}, ${POLICIES[scenario.policy].short}.`),
+      el('p', { class: 'occ__sub' }, t('occ.sub', { open, mean: (eraseSum / Math.max(1, kvBlocks)).toFixed(1), max: eraseMax })),
+      el('p', { class: 'occ__note' }, t('occ.note', {
+        model: MODELS[scenario.model].name,
+        workload: t(`wl.${scenario.workload}.name`),
+        policy: t(`pol.${scenario.policy}.short`),
+      })),
     )
-  })
+  }
 
+  /* ---- actions shared by the UI and the tour -------------------------------------- */
   function focusStack(s: number): void {
     state.focusStack = s
     bus.emit('focus', { id: `stack.${s}` })
     hud.sync()
   }
-
-  const hud = createHud(hudRoot, state, bus, {
-    home: () => rig.setView(VIEW.home.target, VIEW.home.pos),
-    overview: () => rig.setView(VIEW.overview.target, VIEW.overview.pos),
-    toggleTheme: () => {
-      toggleThemeMode()
-    },
-    toggleLabels: () => {
-      state.labels = !state.labels
-      hud.sync()
-    },
-    toggleBulk: () => {
-      state.showBulkSilicon = !state.showBulkSilicon
-      hud.sync()
-    },
-    toggleScale: () => {
-      state.verticalScaleTarget = state.verticalScaleTarget > 1.01 ? 1 : DEFAULT_VERTICAL_SCALE
-      hud.sync()
-    },
-    focusStack,
-  })
 
   function setView(v: BlockView): void {
     simView.mode = v
@@ -372,42 +448,149 @@ async function boot(): Promise<void> {
     simView.repaintAll(sim.store)
   }
 
-  const panel = createSimPanel(hudRoot, scenario, {
-    togglePlay: () => {
-      playing = !playing
-    },
-    setSpeed: (v) => {
-      speed = v
-      playing = true
-    },
-    setScenario: (s) => {
-      scenario = s
-      sim = makeSim(s)
-      activity.reset()
-      simView.repaintAll(sim.store)
-      panel.sync()
-      inspector.show(selected)
-    },
-    skip: (seconds) => {
-      sim.run(seconds)
-      simView.update(sim.store, performance.now() + 1e6)
-      bus.emit('toast', { text: `Simulated ${(seconds / 3600).toFixed(0)} hours`, ms: 1800 })
-    },
-    setView,
+  function setScenario(s: Scenario): void {
+    scenario = s
+    sim = makeSim(s)
+    activity.reset()
+    simView.repaintAll(sim.store)
+    panel.sync()
+    inspector.show(selected)
+  }
+
+  /**
+   * Simulate ahead in slices of about 30 ms, so the page stays responsive and
+   * the blocks visibly fill while it runs. A new scenario cancels it.
+   */
+  let skipping: Sim | null = null
+  function skip(seconds: number, toast = true): void {
+    if (skipping === sim) return
+    const target = sim.now + seconds
+    const s = (skipping = sim)
+    const slice = () => {
+      if (s !== sim) return
+      const t0 = performance.now()
+      while (s.now < target && performance.now() - t0 < 30) s.run(Math.min(600, target - s.now))
+      simView.update(s.store, performance.now())
+      if (s.now < target) {
+        window.setTimeout(slice, 0)
+        return
+      }
+      skipping = null
+      simView.repaintAll(s.store)
+      activity.resync(s)
+      if (toast) bus.emit('toast', { text: t('toast.skipped', { h: (seconds / 3600).toFixed(0) }), ms: 1800 })
+    }
+    slice()
+  }
+
+  function closeAll(): void {
+    for (let s = 0; s < N; s++) state.explodeTarget[s] = 0
+    hud.sync()
+  }
+
+  /* ---- UI, rebuilt on a language change -------------------------------------------- */
+  let hud!: Hud
+  let inspector!: Inspector
+  let panel!: SimPanel
+  let tour!: Tour
+
+  function buildUi(): void {
+    hud = createHud(hudRoot, state, bus, {
+      home: () => goHome(rig),
+      overview: () => goOverview(rig),
+      toggleTheme: () => {
+        toggleThemeMode()
+      },
+      toggleLabels: () => {
+        state.labels = !state.labels
+        hud.sync()
+      },
+      toggleBulk: () => {
+        state.showBulkSilicon = !state.showBulkSilicon
+        hud.sync()
+      },
+      toggleScale: () => {
+        state.verticalScaleTarget = state.verticalScaleTarget > 1.01 ? 1 : DEFAULT_VERTICAL_SCALE
+        hud.sync()
+      },
+      toggleLang: () => setLang(lang() === 'zh' ? 'en' : 'zh'),
+      focusStack,
+      tour: () => tour.start(),
+    })
+    panel = createSimPanel(hud.bottom, hud.leftCol, hud.rightCol, scenario, {
+      togglePlay: () => {
+        playing = !playing
+      },
+      setSpeed: (v) => {
+        speed = v
+        playing = true
+      },
+      setScenario,
+      skip,
+      setView,
+    })
+    panel.setView(simView.mode)
+    panel.sync()
+    inspector = createInspector(hudRoot, registry, bus)
+    inspector.setExtra(blockStats)
+    inspector.onFocus((id) => flyToId(id))
+    tour = createTour(hud.bottom, {
+      home: () => goHome(rig),
+      overview: () => goOverview(rig),
+      focus: (id) => {
+        select(id)
+        flyToId(id)
+      },
+      peek,
+      select,
+      setExplode: (s, v) => {
+        state.explodeTarget[s] = v
+        hud.sync()
+      },
+      closeAll,
+      setBlockView: setView,
+      setSpeed: (v) => {
+        speed = v
+      },
+      setPlaying: (v) => {
+        playing = v
+      },
+      ensureTime: (seconds) => {
+        if (sim.now < seconds) skip(seconds - sim.now, false)
+      },
+    })
+    inspector.show(selected)
+    hud.setRightVisible(!selected)
+    hud.sync()
+  }
+  buildUi()
+
+  onLang(() => {
+    document.title = t('doc.title')
+    const wasTour = tour.active
+    tour.stop()
+    inspector.dispose()
+    hud.dispose()
+    buildUi()
+    labels.relabel()
+    if (wasTour) bus.emit('toast', { text: t('tb.tour'), ms: 1200 })
   })
-  panel.sync()
-  if (params.get('blocks') === 'wear') setView('wear')
 
   onThemeMode(() => {
     gfx.refreshEnvironment()
     document.documentElement.dataset.theme = themeMode()
     hud.sync()
+    panel.repaint()
     inspector.show(selected)
   })
 
   window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey || e.altKey) return
     const k = e.key.toLowerCase()
+    if (tour.key(k)) {
+      e.preventDefault()
+      return
+    }
     if (k === ' ') {
       e.preventDefault()
       playing = !playing
@@ -420,9 +603,10 @@ async function boot(): Promise<void> {
       const anyClosed = state.explodeTarget.some((v) => v < 0.3)
       for (let s = 0; s < N; s++) state.explodeTarget[s] = anyClosed ? 0.65 : 0
       hud.sync()
-    } else if (k === 'h') rig.setView(VIEW.home.target, VIEW.home.pos)
-    else if (k === 'o') rig.setView(VIEW.overview.target, VIEW.overview.pos)
+    } else if (k === 'h') goHome(rig)
+    else if (k === 'o') goOverview(rig)
     else if (k === 'n') toggleThemeMode()
+    else if (k === 't') tour.start()
     else if (k === 'w') setView(simView.mode === 'wear' ? 'state' : 'wear')
     else if (k === 'l') {
       state.labels = !state.labels
@@ -430,7 +614,7 @@ async function boot(): Promise<void> {
     } else if (k === 'b') {
       state.showBulkSilicon = !state.showBulkSilicon
       hud.sync()
-    } else if (k === 't') {
+    } else if (k === 'v') {
       state.verticalScaleTarget = state.verticalScaleTarget > 1.01 ? 1 : DEFAULT_VERTICAL_SCALE
       hud.sync()
     } else if (k === 'escape') select(null)
@@ -440,25 +624,17 @@ async function boot(): Promise<void> {
   /* ---- start-up view from the URL ---------------------------------------------- */
   const view = params.get('view')
   if (view === 'overview') {
-    camera.position.set(...VIEW.overview.pos)
+    camera.position.set(...fitted(VIEW.overview).pos)
     rig.controls.target.set(...VIEW.overview.target)
     rig.controls.update()
   }
+  if (params.get('blocks') === 'wear') setView('wear')
   const pDie = Number(params.get('die'))
   if (params.has('die') && Number.isInteger(pDie) && pDie >= 0 && pDie < HBF.diesPerStack) {
     select(`stack.${state.focusStack}.die.${pDie}`)
   }
   const pSelect = params.get('select')
   if (pSelect && registry.get(pSelect)) select(pSelect)
-  if (view === 'stack') {
-    const def = registry.get(`stack.${state.focusStack}`)
-    if (def) {
-      state.explode[state.focusStack] = state.explodeTarget[state.focusStack]
-      stacks.update(0, state)
-      rig.flyTo(focusFor(def), 0.001)
-    }
-  }
-  const pFocus = params.get('focus')
   if (settleMode) {
     for (let s = 0; s < N; s++) {
       state.explode[s] = state.explodeTarget[s]
@@ -467,7 +643,14 @@ async function boot(): Promise<void> {
     }
     stacks.update(0, state)
   }
-  if (pFocus && registry.get(pFocus)) rig.flyTo(focusFor(registry.get(pFocus)!), 0.001)
+  if (view === 'stack') flyToId(`stack.${state.focusStack}`)
+  const pFocus = params.get('focus')
+  if (pFocus && registry.get(pFocus)) flyToId(pFocus)
+  const pTour = params.has('tour') ? Number(params.get('tour')) : NaN
+  if (Number.isInteger(pTour) && pTour >= 1 && pTour <= 8) {
+    tour.start()
+    for (let i = 1; i < pTour; i++) tour.key('arrowright')
+  }
 
   ;(window as unknown as { HBFCITY: unknown }).HBFCITY = {
     state,
@@ -481,7 +664,7 @@ async function boot(): Promise<void> {
     },
   }
 
-  await progress(100, 'Ready')
+  await progress(100, t('boot.ready'))
   if (settleMode) document.getElementById('boot')?.remove()
   else {
     document.getElementById('boot')?.classList.add('boot--done')
@@ -505,9 +688,7 @@ async function boot(): Promise<void> {
     simView.update(sim.store, now)
     stacks.setActivity(activity, dt)
     pkg.setActivity(activity, dt)
-    let readAvg = 0
-    for (let i = 0; i < activity.read.length; i++) readAvg += activity.read[i]
-    gpu.setActivity(activity.compute, readAvg / activity.read.length)
+    gpu.setActivity(activity.compute, activity.readMean)
     if (now - lastPanel > 200) {
       lastPanel = now
       panel.update(sim, playing, speed, load, simView.wearRange)
@@ -528,5 +709,5 @@ async function boot(): Promise<void> {
 
 boot().catch((err) => {
   console.error('[HBFCity]', err)
-  if (bootStatus) bootStatus.textContent = `Failed to start: ${err instanceof Error ? err.message : String(err)}`
+  if (bootStatus) bootStatus.textContent = t('boot.failed', { msg: err instanceof Error ? err.message : String(err) })
 })

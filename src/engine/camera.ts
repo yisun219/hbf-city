@@ -39,8 +39,7 @@ export function createCameraRig(camera: THREE.PerspectiveCamera, dom: HTMLElemen
   controls.rotateSpeed = 0.6
   controls.panSpeed = 1.0
   controls.zoomSpeed = 1.1
-  controls.keyPanSpeed = 28
-  controls.listenToKeyEvents(window)
+  // No keyboard panning: arrow keys belong to the tour.
 
   const fromPos = new THREE.Vector3()
   const fromTarget = new THREE.Vector3()

@@ -6,14 +6,27 @@
     <meta name="color-scheme" content="dark light" />
     <title>HBFCity — a GPU package with High Bandwidth Flash</title>
     <meta name="description" content="An explorable 3D city of a GPU package with High Bandwidth Flash stacks, for LLM serving." />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="HBFCity — a GPU package with High Bandwidth Flash" />
+    <meta property="og:description" content="Open up a GPU package with six High Bandwidth Flash stacks, down to every NAND block, while an LLM-serving simulator writes, evicts and erases its KV cache. English and 中文." />
+    <meta property="og:url" content="https://yisun219.github.io/hbf-city/" />
+    <meta property="og:image" content="https://yisun219.github.io/hbf-city/og.jpg" />
+    <meta name="twitter:card" content="summary_large_image" />
     <script>
       try {
-        var t = localStorage.getItem('hbfcity.theme')
         var q = new URLSearchParams(location.search).get('theme')
-        document.documentElement.dataset.theme = q === 'day' || q === 'night' ? q : t === 'day' ? 'day' : 'night'
+        var t = localStorage.getItem('hbfcity.theme')
+        var sys = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'day' : 'night'
+        document.documentElement.dataset.theme =
+          q === 'day' || q === 'light' ? 'day' : q === 'night' || q === 'dark' ? 'night' : t === 'day' || t === 'night' ? t : sys
+        // the same language rule as core/i18n.ts, so the loading screen does not flash English
+        var l = new URLSearchParams(location.search).get('lang') || localStorage.getItem('hbfcity.lang') || ''
+        var zh = l === 'zh' || (l !== 'en' && (navigator.language || '').toLowerCase().indexOf('zh') === 0)
+        document.documentElement.lang = zh ? 'zh-CN' : 'en'
+        window.__hbfBoot = zh ? '加载中' : 'Loading'
       } catch (e) {}
     </script>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='22' width='20' height='4' rx='1' fill='%233fc8ff'/%3E%3Crect x='6' y='16' width='20' height='4' rx='1' fill='%237fd8ff'/%3E%3Crect x='6' y='10' width='20' height='4' rx='1' fill='%23a9dcff'/%3E%3Crect x='6' y='4' width='20' height='4' rx='1' fill='%23ffb03a'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='22' width='20' height='4' rx='1' fill='%232a78d6'/%3E%3Crect x='6' y='16' width='20' height='4' rx='1' fill='%233d8be6'/%3E%3Crect x='6' y='10' width='20' height='4' rx='1' fill='%237fb3f2'/%3E%3Crect x='6' y='4' width='20' height='4' rx='1' fill='%23e3a21a'/%3E%3C/svg%3E" />
   </head>
   <body>
     <div id="canvas-root"></div>
@@ -22,7 +35,10 @@
     <div id="boot" role="status">
       <div class="boot__title">HBFCity</div>
       <div class="boot__bar"><i id="boot-fill"></i></div>
-      <div id="boot-status" class="boot__status">Loading</div>
+      <div id="boot-status" class="boot__status"></div>
+      <script>
+        document.getElementById('boot-status').textContent = window.__hbfBoot || 'Loading'
+      </script>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -86,7 +86,7 @@ varying float vFlowCoord;`,
       material.color.setHex(base).multiplyScalar(opts.nightBase ?? 0.3)
       material.emissive.setHex(base)
       material.emissiveIntensity = 0.12
-      uniforms.uGain.value = air.glow * 1.3
+      uniforms.uGain.value = air.glow * 0.85
     } else {
       material.color.setHex(base)
       material.emissive.setHex(0)

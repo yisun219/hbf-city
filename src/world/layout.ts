@@ -42,7 +42,11 @@ export const GPU_DIE = {
   length: GPU.dieMm.length * MM,
 } as const
 
-/** Gap between the GPU edge and a stack's PHY edge. Real parts sit ~1 mm apart. */
+/**
+ * Gap between the GPU edge and a stack's PHY edge: 1.6 mm. No source gives the
+ * real gap; OCP §5.1.1 keeps the UCIe channel under 2 mm bump to bump, and the
+ * nearest drawn PHY edges are about 1.84 mm apart.
+ */
 export const GAP_GPU_STACK = 16
 /** Gap between neighbouring stacks along the GPU edge. */
 export const GAP_STACK_STACK = 4
@@ -241,7 +245,7 @@ export function stackV(site: StackSite, v: number): number {
  *
  * OCP Fig. 1 per channel: UCIe PHY -> Base Die Controller -> NAND-side PHY,
  * plus shared DA port, TSV repair, IEEE 1500, IEEE 1149.1 and BIST blocks.
- * HBFlex's 40 MiB of SRAM is drawn as banks either side of the TSV strip.
+ * HBFlex's 40 MB of SRAM is drawn as banks either side of the TSV strip.
  * -------------------------------------------------------------------------*/
 
 export const BASE_PLAN = {
@@ -282,6 +286,6 @@ export const GPU_PLAN = {
  * -------------------------------------------------------------------------*/
 
 export const VIEW = {
-  home: { target: [40, 70, -30] as [number, number, number], pos: [470, 380, 610] as [number, number, number] },
+  home: { target: [40, 70, -30] as [number, number, number], pos: [522, 417, 687] as [number, number, number] },
   overview: { target: [0, 0, 0] as [number, number, number], pos: [0, 1150, 24] as [number, number, number] },
 } as const

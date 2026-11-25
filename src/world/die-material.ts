@@ -28,12 +28,12 @@ const f = (x: number): string => x.toFixed(5)
 const FRAGMENT_DECLS = /* glsl */ `
 uniform sampler2D uOcc;
 uniform sampler2D uAct;
-uniform vec3 uErase;
 uniform vec3 uTop;
 uniform vec3 uSilicon;
 uniform vec3 uSeal;
 uniform vec3 uCopper;
 uniform vec3 uTsv;
+uniform vec3 uSel;
 uniform float uGlow;
 uniform float uNight;
 uniform float uSelDie;
@@ -95,9 +95,9 @@ void hbfPlan(inout vec3 albedo, inout vec3 emis, inout float rough, inout float 
   // Seal ring.
   float inner = hbfBand(HBF_SEAL, 1.0 - HBF_SEAL, u, wu) * hbfBand(HBF_SEAL, 1.0 - HBF_SEAL, v, wv);
   albedo = mix(uSeal, albedo, inner);
-  if (selected) emis += uTsv * (1.0 - inner) * (0.35 + 0.65 * uNight) * 1.4;
-  // erases flash the seal ring
-  emis += uErase * (1.0 - inner) * act.b * (0.4 + 0.8 * uNight);
+  // the selected die's seal ring carries the selection colour, softly
+  if (selected) emis += uSel * (1.0 - inner) * mix(0.3, 0.55, uNight);
+  // (erases flash the erased block rows themselves, in the atlas)
 
   // Power-TSV rows along both long edges.
   float inU = hbfBand(HBF_PU0, HBF_PU1, u, wu);
@@ -130,7 +130,7 @@ void hbfPlan(inout vec3 albedo, inout vec3 emis, inout float rough, inout float 
     vec3 strip = mix(uTop * 0.6, mix(uCopper, uTsv, 0.55 + 0.45 * uNight), k);
     albedo = mix(albedo, strip, spine);
     // the strip carries every read and program to and from the base die
-    emis += uTsv * (uGlow * 0.45 + (0.3 + 0.6 * uNight) * (act.r * 0.45 + act.g)) * spine * k;
+    emis += uTsv * (uGlow * 0.14 + (0.1 + 0.3 * uNight) * (act.r * 0.5 + act.g)) * spine * k;
     metal = mix(metal, 0.75, spine * k);
   }
 
@@ -207,19 +207,19 @@ export function createCoreDieMaterial(occupancy: THREE.Texture, activity: THREE.
   const uniforms = {
     uOcc: { value: occupancy },
     uAct: { value: activity },
-    uErase: { value: new THREE.Color() },
     uTop: { value: new THREE.Color() },
     uSilicon: { value: new THREE.Color() },
     uSeal: { value: new THREE.Color() },
     uCopper: { value: new THREE.Color() },
     uTsv: { value: new THREE.Color() },
+    uSel: { value: new THREE.Color() },
     uGlow: { value: 0 },
     uNight: { value: 1 },
     uSelDie: { value: -1 },
   }
   const material = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.3 })
   material.name = 'hbfcity.coreDie'
-  material.customProgramCacheKey = () => 'hbfcity.coreDie.v2'
+  material.customProgramCacheKey = () => 'hbfcity.coreDie.v3'
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
     shader.vertexShader = shader.vertexShader
@@ -266,7 +266,7 @@ vHbfFlip = aFlip;`,
     uniforms.uSeal.value.setHex(p.seal)
     uniforms.uCopper.value.setHex(p.copper)
     uniforms.uTsv.value.setHex(p.tsv)
-    uniforms.uErase.value.setHex(p.invalid)
+    uniforms.uSel.value.setHex(p.kv)
     uniforms.uGlow.value = air.glow
     uniforms.uNight.value = mode === 'night' ? 1 : 0
   })

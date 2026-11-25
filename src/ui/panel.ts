@@ -1,7 +1,7 @@
 import { SOURCES } from '../core/hbf-spec'
+import { t } from '../core/i18n'
 import type { SourceKey } from '../core/hbf-spec'
 import type { Registry } from '../core/registry'
-import { cssHex } from '../core/theme'
 import type { Bus, ComponentDef } from '../core/types'
 import { docFor } from './content'
 import { el } from './dom'
@@ -16,6 +16,9 @@ import { el } from './dom'
 
 export interface Inspector {
   show(id: string | null): void
+  /** a "Focus" button in the header calls this */
+  onFocus(fn: (id: string) => void): void
+  dispose(): void
   /** extra live rows supplied by main (e.g. simulated block counts) */
   setExtra(render: ((def: ComponentDef) => HTMLElement | null) | null): void
 }
@@ -41,22 +44,25 @@ export function createInspector(root: HTMLElement, registry: Registry, bus: Bus)
   root.append(panel)
   let extra: ((def: ComponentDef) => HTMLElement | null) | null = null
   let current: string | null = null
+  let focusFn: ((id: string) => void) | null = null
 
   function render(def: ComponentDef): void {
     const doc = docFor(def.doc)
     panel.replaceChildren()
-    const close = el('button', { class: 'inspector__close', type: 'button', 'aria-label': 'Close' }, '×')
+    const close = el('button', { class: 'inspector__close', type: 'button', 'aria-label': t('common.close') }, '×')
     close.addEventListener('click', () => bus.emit('select', { id: null }))
+    const focus = el('button', { class: 'btn btn--small', type: 'button' }, t('insp.focus'))
+    focus.addEventListener('click', () => focusFn?.(def.id))
     const dot = el('span', { class: 'inspector__dot' })
-    if (def.color !== undefined) dot.style.background = cssHex(def.color)
+    if (def.color !== undefined) dot.style.background = `var(--c-${def.color})`
     panel.append(
       el('header', { class: 'inspector__head' },
         dot,
         el('div', { class: 'inspector__titles' },
-          el('h2', {}, def.name),
-          el('p', { class: 'inspector__role' }, def.role),
+          el('h2', {}, def.name()),
+          el('p', { class: 'inspector__role' }, def.role()),
         ),
-        close,
+        el('div', { class: 'inspector__tools' }, focus, close),
       ),
     )
     if (!doc) return
@@ -85,7 +91,7 @@ export function createInspector(root: HTMLElement, registry: Registry, bus: Bus)
     if (doc.caveats?.length) {
       const list = el('ul', {})
       for (const c of doc.caveats) list.append(el('li', {}, md(c)))
-      body.append(el('section', { class: 'inspector__caveats' }, el('h3', {}, 'Simplified here'), list))
+      body.append(el('section', { class: 'inspector__caveats' }, el('h3', {}, t('insp.simplified')), list))
     }
     if (doc.sources.length) {
       const list = el('ul', {})
@@ -96,7 +102,7 @@ export function createInspector(root: HTMLElement, registry: Registry, bus: Bus)
           : el('span', {}, ref?.label ?? s.key)
         list.append(el('li', {}, name, el('span', { class: 'inspector__where' }, ` — ${s.where}`)))
       }
-      body.append(el('section', { class: 'inspector__sources' }, el('h3', {}, 'Sources'), list))
+      body.append(el('section', { class: 'inspector__sources' }, el('h3', {}, t('insp.sources')), list))
     }
   }
 
@@ -114,6 +120,12 @@ export function createInspector(root: HTMLElement, registry: Registry, bus: Bus)
     setExtra(fn) {
       extra = fn
       if (current) this.show(current)
+    },
+    onFocus(fn) {
+      focusFn = fn
+    },
+    dispose() {
+      panel.remove()
     },
   }
 }

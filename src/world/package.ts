@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { HBF, THICKNESS_UM } from '../core/hbf-spec'
+import { t } from '../core/i18n'
 import { surface } from '../core/theme'
 import type { SceneState, WorldContext, WorldModule } from '../core/types'
 import { makeRng } from '../core/util'
@@ -258,8 +259,8 @@ export function createPackage(ctx: WorldContext): PackageModule {
   /* ---- components ------------------------------------------------------------ */
   ctx.register({
     id: 'package.interposer',
-    name: 'Silicon interposer',
-    role: 'wiring between the GPU and six HBF stacks',
+    name: () => t('comp.interposer.name'),
+    role: () => t('comp.interposer.role'),
     kind: 'package',
     district: 'package',
     object: interposer,
@@ -270,8 +271,8 @@ export function createPackage(ctx: WorldContext): PackageModule {
   })
   ctx.register({
     id: 'package.substrate',
-    name: 'Package substrate',
-    role: 'organic substrate with decoupling capacitors',
+    name: () => t('comp.substrate.name'),
+    role: () => t('comp.substrate.role'),
     kind: 'package',
     district: 'package',
     object: substrate,
@@ -287,8 +288,8 @@ export function createPackage(ctx: WorldContext): PackageModule {
     const gpuEdge = site.side === 'west' ? -GPU_DIE.width / 2 : GPU_DIE.width / 2
     ctx.register({
       id: `package.ucie.${site.index}`,
-      name: `UCIe links ${site.index}`,
-      role: `16 host channels · GPU to stack ${site.index}`,
+      name: () => t('comp.ucie.name', { s: site.index }),
+      role: () => t('comp.ucie.role', { s: site.index }),
       kind: 'link',
       district: 'package',
       object: lanes,
@@ -299,7 +300,7 @@ export function createPackage(ctx: WorldContext): PackageModule {
       ),
       tier: 2,
       doc: 'ucie',
-      color: 0x6e8dff,
+      color: 'link',
       stack: site.index,
       labelWhen: () => ctx.state.focusStack === site.index,
     })

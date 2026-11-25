@@ -67,8 +67,10 @@ export function createPicker(opts: {
   camera: THREE.PerspectiveCamera
   registry: Registry
   bus: Bus
+  /** the hit under the pointer after each hover pick (null when none), with client coordinates */
+  onHoverHit?: (hit: THREE.Intersection | null, x: number, y: number) => void
 }): Picker {
-  const { dom, camera, registry, bus } = opts
+  const { dom, camera, registry, bus, onHoverHit } = opts
   const group = new THREE.Group()
   group.name = 'picker'
 
@@ -100,15 +102,22 @@ export function createPicker(opts: {
   let downX = 0
   let downY = 0
 
+  /** the intersection the last pick resolved, or null */
+  let lastHit: THREE.Intersection | null = null
+
   function pick(clientX: number, clientY: number): string | null {
     const r = dom.getBoundingClientRect()
     ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1)
     ray.setFromCamera(ndc, camera)
     const hits = ray.intersectObjects(registry.roots(), true)
+    lastHit = null
     for (const h of hits) {
       if (!h.object.visible || h.object.userData.noPick) continue
       const def = registry.resolve(h.object, h.instanceId)
-      if (def) return def.id
+      if (def) {
+        lastHit = h
+        return def.id
+      }
     }
     return null
   }
@@ -119,7 +128,9 @@ export function createPicker(opts: {
     pending = true
   })
   dom.addEventListener('pointerleave', () => {
+    pending = false
     bus.emit('hover', { id: null })
+    onHoverHit?.(null, 0, 0)
   })
   dom.addEventListener('pointerdown', (e) => {
     downX = e.clientX
@@ -140,6 +151,7 @@ export function createPicker(opts: {
       pending = false
       const id = pick(lastX, lastY)
       if (id !== hovered) bus.emit('hover', { id })
+      onHoverHit?.(lastHit, lastX, lastY)
     }
     if (selected) {
       const def = registry.get(selected)

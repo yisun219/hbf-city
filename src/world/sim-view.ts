@@ -1,7 +1,7 @@
 import { HBF } from '../core/hbf-spec'
 import type { Palette } from '../core/theme'
 import type { ThemeMode } from '../core/types'
-import { PAGES_PER_SB, SbState, domainDies } from '../sim/store'
+import { PAGES_PER_SB, SbState, domainDieTable } from '../sim/store'
 import type { Store } from '../sim/store'
 import type { OccupancyAtlas } from './occupancy'
 
@@ -13,10 +13,14 @@ import type { OccupancyAtlas } from './occupancy'
  * dirty are repainted, except in the wear view, where every colour depends on
  * the current maximum and the whole atlas is repainted a few times a second.
  *
- *   state view  weights amber · open block green · closed blocks from cyan
- *               (all pages valid) to pink (all invalid) · free grey
- *   wear view   erase count on a log heat ramp from 0 to the most-erased KV
- *               block; weight blocks, which never erase, stay dim amber
+ *   state view  weights amber · open block light blue · closed blocks from
+ *               blue (all pages valid) to pink (all invalid) · free grey
+ *   wear view   erase count on a single-hue orange ramp (log scale) from 0 to
+ *               the most-erased KV block; weight blocks, which never erase,
+ *               are neutral grey and sit outside the ramp
+ *
+ * An erase flashes the erased block row bright for a moment, so a storm of
+ * reclamation is visible exactly where it happens.
  * ==========================================================================*/
 
 export type BlockView = 'state' | 'wear'
@@ -31,14 +35,19 @@ export interface SimView {
   readonly wearRange: { min: number; max: number }
 }
 
-/* Heat ramp: deep blue -> teal -> yellow -> orange -> red. */
-const RAMP: [number, number, number][] = [
-  [24, 40, 92],
-  [22, 150, 170],
-  [240, 220, 80],
-  [245, 140, 40],
-  [230, 50, 50],
-]
+/**
+ * Wear ramps, one hue each: by day light to dark, by night dark to bright, so
+ * "more erases" always means "further from the background". The CSS legend
+ * (--wear-0..4 in styles/app.css) mirrors these stops.
+ */
+const WEAR_RAMP: Record<ThemeMode, [number, number, number][]> = {
+  day: [0xf3dccb, 0xeaa36f, 0xd9622b, 0xa33d12, 0x6b2408].map((h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255]),
+  night: [0x3b2418, 0x7a3a18, 0xc05a22, 0xf08a3c, 0xffc38a].map((h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255]),
+}
+/** Weight blocks in the wear view: neutral, outside the ramp. */
+const WEAR_WEIGHTS: Record<ThemeMode, number> = { day: 0x8a919b, night: 0x121821 }
+
+let RAMP = WEAR_RAMP.night
 
 function ramp(t: number, out: number[]): void {
   const x = Math.min(0.9999, Math.max(0, t)) * (RAMP.length - 1)
@@ -60,11 +69,18 @@ export function createSimView(atlas: OccupancyAtlas): SimView {
   let invalid = rgb(0)
   let openC = rgb(0)
   let free = rgb(0)
+  let wearWeights = rgb(0)
   const wearRange = { min: 0, max: 0 }
   let lastWear = -Infinity
   const tmp = [0, 0, 0]
+  /** erase counts as last painted, to notice erases */
+  let seen = new Uint32Array(0)
+  /** superblocks flashing, and when each flash ends (ms) */
+  const flashing = new Map<number, number>()
+  const FLASH_MS = 650
+  let flashRgb = rgb(0)
 
-  function paint(store: Store, sb: number): void {
+  function paint(store: Store, sb: number, flash = false): void {
     const domain = Math.floor(sb / HBF.blocksPerPlane)
     const block = sb % HBF.blocksPerPlane
     const st = store.state[sb]
@@ -72,20 +88,25 @@ export function createSimView(atlas: OccupancyAtlas): SimView {
     let g: number
     let b: number
     let glow: number
-    if (view.mode === 'wear' && st !== SbState.Weights) {
+    if (flash) {
+      r = flashRgb[0]
+      g = flashRgb[1]
+      b = flashRgb[2]
+      glow = 1
+    } else if (view.mode === 'wear' && st !== SbState.Weights) {
       // log scale: a few hot blocks would otherwise squash everything else to blue
       const t = Math.log1p(store.erase[sb]) / Math.log1p(Math.max(1, wearRange.max))
       ramp(t, tmp)
       r = tmp[0]
       g = tmp[1]
       b = tmp[2]
-      glow = 0.12 + 0.3 * t
+      glow = 0.1 + 0.25 * t
     } else if (st === SbState.Weights) {
-      const k = view.mode === 'wear' ? 0.45 : 1
-      r = weights[0] * k
-      g = weights[1] * k
-      b = weights[2] * k
-      glow = view.mode === 'wear' ? 0.05 : 0.3
+      const c = view.mode === 'wear' ? wearWeights : weights
+      r = c[0]
+      g = c[1]
+      b = c[2]
+      glow = view.mode === 'wear' ? 0 : 0.3
     } else if (st === SbState.Free) {
       r = free[0]
       g = free[1]
@@ -95,7 +116,7 @@ export function createSimView(atlas: OccupancyAtlas): SimView {
       r = openC[0]
       g = openC[1]
       b = openC[2]
-      glow = 0.95
+      glow = 0.7
     } else {
       // closed: fraction of its written pages still valid
       const w = Math.max(1, store.written[sb])
@@ -111,7 +132,14 @@ export function createSimView(atlas: OccupancyAtlas): SimView {
       glow = 0.26 + (1 - v) * 0.1
     }
     const a = night ? Math.round(glow * 255) : 0
-    for (const die of domainDies(store.width, domain)) atlas.paintRow(die, block, r, g, b, a)
+    const dies = domainDieTable(store.width)[domain]
+    for (let j = 0; j < dies.length; j++) atlas.paintRow(dies[j], block, r, g, b, a)
+  }
+
+  function syncSeen(store: Store): void {
+    if (seen.length !== store.superblocks) seen = new Uint32Array(store.superblocks)
+    seen.set(store.erase)
+    flashing.clear()
   }
 
   function refreshWearRange(store: Store): void {
@@ -131,22 +159,42 @@ export function createSimView(atlas: OccupancyAtlas): SimView {
     mode: 'state',
     wearRange,
     update(store, nowMs) {
+      if (seen.length !== store.superblocks) syncSeen(store)
       if (view.mode === 'wear' && nowMs - lastWear > 500) {
         lastWear = nowMs
         refreshWearRange(store)
         for (let sb = 0; sb < store.superblocks; sb++) paint(store, sb)
+        seen.set(store.erase)
         store.clearDirty()
         atlas.touch()
       } else if (store.dirtyCount > 0) {
         const n = store.dirtyCount
-        for (let i = 0; i < n; i++) paint(store, store.dirty[i])
+        for (let i = 0; i < n; i++) {
+          const sb = store.dirty[i]
+          const erased = store.erase[sb] !== seen[sb]
+          seen[sb] = store.erase[sb]
+          if (erased && view.mode === 'state') {
+            flashing.set(sb, nowMs + FLASH_MS)
+            paint(store, sb, true)
+          } else if (!flashing.has(sb)) paint(store, sb)
+        }
         store.clearDirty()
         atlas.touch()
+      }
+      if (flashing.size) {
+        for (const [sb, until] of flashing) {
+          if (nowMs >= until) {
+            flashing.delete(sb)
+            paint(store, sb)
+            atlas.touch()
+          }
+        }
       }
       atlas.flush(nowMs)
     },
     repaintAll(store) {
       refreshWearRange(store)
+      syncSeen(store)
       for (let sb = 0; sb < store.superblocks; sb++) paint(store, sb)
       store.clearDirty()
       atlas.touch()
@@ -154,11 +202,14 @@ export function createSimView(atlas: OccupancyAtlas): SimView {
     },
     setPalette(mode, p) {
       night = mode === 'night'
+      flashRgb = rgb(mode === 'night' ? 0xff6b5a : 0xe0442f)
       weights = rgb(p.weights)
       kv = rgb(p.kv)
       invalid = rgb(p.invalid)
       openC = rgb(p.kvTail)
       free = rgb(p.free)
+      wearWeights = rgb(WEAR_WEIGHTS[mode])
+      RAMP = WEAR_RAMP[mode]
     },
   }
   return view

@@ -6,10 +6,12 @@
  * documents do not give are marked `estimate` and the inspector says so.
  *
  * Sources (short keys used in `SOURCES` below and in the inspector):
- *   OCP       OCP HBF Architecture Specification v0.7.0 (03 Aug 2026)
+ *   OCP       Open Compute Project, High Bandwidth Flash (HBF) High-Level Base
+ *             Die Specification, version 0.7.0 (3 Aug 2026)
  *   HBFLEX    HBFlex, arXiv 2609.18675 (device geometry and timing)
- *   SANDISK   Ilkbahar, Ramanujan, Coughlin, "High Bandwidth Flash", IEEE
- *             Computer, May 2026 (CBA, 16-die stack, TSVs, logic die)
+ *   SANDISK   Ilkbahar, Ramanujan, Coughlin, "High Bandwidth Flash: A New
+ *             Memory for the Next Generation of AI Computing", IEEE Computer,
+ *             May 2026, pp. 134-138 (CBA, 16-die stack, TSVs, logic die)
  *   FLASHACC  FlashAccel, arXiv 2607.10186 (array die over circuit die,
  *             per-plane R/W circuits, TSV strip, base-die controller + SRAM)
  *   HBFSUCKS  "HBF Sucks!", arXiv 2608.11668 (centre signal TSVs, edge power
@@ -28,11 +30,12 @@ export interface SourceRef {
 }
 
 export const SOURCES: Record<SourceKey, SourceRef> = {
-  OCP: { key: 'OCP', label: 'OCP HBF Architecture Specification v0.7.0 (Aug 2026)' },
+  OCP: { key: 'OCP', label: 'OCP, High Bandwidth Flash (HBF) High-Level Base Die Specification v0.7.0 (Aug 2026)' },
   HBFLEX: { key: 'HBFLEX', label: 'HBFlex, arXiv 2609.18675', url: 'https://arxiv.org/abs/2609.18675' },
   SANDISK: {
     key: 'SANDISK',
-    label: 'Ilkbahar et al., "High Bandwidth Flash", IEEE Computer, May 2026',
+    label: 'Ilkbahar et al., "High Bandwidth Flash: A New Memory for the Next Generation of AI Computing", IEEE Computer, May 2026',
+    url: 'https://doi.org/10.1109/MC.2026.3670627',
   },
   FLASHACC: { key: 'FLASHACC', label: 'FlashAccel, arXiv 2607.10186', url: 'https://arxiv.org/abs/2607.10186' },
   HBFSUCKS: { key: 'HBFSUCKS', label: '"HBF Sucks!", arXiv 2608.11668', url: 'https://arxiv.org/abs/2608.11668' },
@@ -40,7 +43,8 @@ export const SOURCES: Record<SourceKey, SourceRef> = {
   GH100: { key: 'GH100', label: 'NVIDIA H100 Tensor Core GPU Architecture whitepaper (GH100)' },
   BAILIAN: {
     key: 'BAILIAN',
-    label: 'Wang et al., "KVCache Cache in the Wild", USENIX ATC 2025 (Qwen-Bailian usage traces)',
+    label: 'Wang et al., "KVCache Cache in the Wild" (Qwen-Bailian usage traces), arXiv 2506.02634',
+    url: 'https://arxiv.org/abs/2506.02634',
   },
 }
 
@@ -67,13 +71,17 @@ export const HBF = {
   readUs: 4,
   /** HBFlex: 75 µs page program (tPROG). */
   programUs: 75,
-  /** SLC endurance assumed by HBFlex and FlashAccel §2.3. */
+  /** HBFlex §3.3: 100K P/E cycles; SLC-class endurance (FlashAccel §2.3). */
   peCycles: 100_000,
   /** estimate: block erase time, typical of SLC NAND */
   eraseUs: 1_500,
-  /** HBFlex: 40 MiB of base-die SRAM per stack. */
-  baseDieSramMiB: 40,
-  /** OCP §10.3: approximate footprint and nominal height. */
+  /** HBFlex §4.1: "40 MB of SRAM per stack, or 240 MB across six stacks". */
+  baseDieSramMB: 40,
+  /**
+   * OCP §4.1: "approximate footprint is 10.975mm x 16mm x 775um". The UCIe
+   * bumps run along one 10.975 mm edge, which faces the GPU (OCP Fig. 37).
+   * (The §10.3 table names 16 mm the width X and 10.975 mm the length Y.)
+   */
   footprintMm: { width: 10.975, length: 16 },
   heightUm: 775,
 } as const
@@ -89,7 +97,7 @@ export const UCIE = {
 
 /* ---------------------------------------------------------------------------
  * Physical thicknesses. Only the total is published; the split is an estimate
- * that sums to OCP's 775 µm.
+ * that sums to about OCP's 775 µm (775.2 µm: 60 + 16 x (36 + 8.7)).
  * -------------------------------------------------------------------------*/
 
 export const THICKNESS_UM = {
@@ -107,7 +115,10 @@ export const THICKNESS_UM = {
  * The GPU (GH100-class; the floor plan is approximate, not a die photo).
  * -------------------------------------------------------------------------*/
 
-/** H200 dense FP8 tensor throughput (NVIDIA datasheet) and an assumed utilisation. */
+/**
+ * Dense FP8 tensor throughput of an H100 / H200 SXM: 1,979 TFLOPS (NVIDIA lists
+ * 3,958 TFLOPS with sparsity), and an assumed utilisation.
+ */
 export const GPU_COMPUTE = { fp8Flops: 1979e12, utilisation: 0.5 } as const
 
 export const GPU = {
@@ -116,9 +127,11 @@ export const GPU = {
   gpcs: 8,
   tpcsPerGpc: 9,
   smsPerTpc: 2,
-  /** H100/H200 SXM enable 132 of GH100's 144 SMs. */
+  /** H100 SXM5 enables 132 of GH100's 144 SMs (GH100 whitepaper). */
   enabledSms: 132,
-  l2MiB: 50,
+  /** H100 SXM5 enables 50 MB of L2; the full GH100 die has 60 MB (whitepaper). */
+  l2MB: 50,
+  l2FullMB: 60,
 } as const
 
 /* ---------------------------------------------------------------------------
@@ -158,5 +171,3 @@ export const stackHeightUm = (): number =>
  */
 export const channelOfDie = (die: number): number => die % HBF.channelsPerStack
 
-/** Plane numbering on a die: row 0 is the north half, columns run outward from the GPU. */
-export const PLANE_GRID = { rows: 2, cols: 16 } as const

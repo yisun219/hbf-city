@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { GPU, HBF, UCIE } from '../core/hbf-spec'
+import { t } from '../core/i18n'
 import { lineMat, signal, surface, themed } from '../core/theme'
 import type { SceneState, WorldContext, WorldModule } from '../core/types'
 import { makeRng } from '../core/util'
@@ -232,20 +233,20 @@ export function createGpu(ctx: WorldContext): GpuModule {
 
   ctx.register({
     id: 'gpu',
-    name: 'GPU die',
-    role: 'GH100-class · drawn active side up',
+    name: () => t('comp.gpu.name'),
+    role: () => t('comp.gpu.role'),
     kind: 'compute',
     district: 'gpu',
     object: slab,
     bounds: (out) => out.set(_p.set(-HX, 0, -HZ), _s.set(HX, gpuHeight(ctx.state.verticalScale), HZ)),
     tier: 0,
     doc: 'gpu',
-    color: 0x7f8cff,
+    color: 'compute',
   })
   ctx.register({
     id: 'gpu.bulk',
-    name: 'Bulk silicon',
-    role: 'the back of a flip-chip die',
+    name: () => t('comp.bulk.name'),
+    role: () => t('comp.bulk.role'),
     kind: 'package',
     district: 'gpu',
     object: ghost,
@@ -258,8 +259,8 @@ export function createGpu(ctx: WorldContext): GpuModule {
     const [cx, cz, w, d] = gpcCenters[g]
     ctx.register({
       id: `gpu.gpc.${g}`,
-      name: `GPC ${g}`,
-      role: `${GPU.tpcsPerGpc} TPCs · ${smPerGpc} SMs`,
+      name: () => t('comp.gpc.name', { g }),
+      role: () => t('comp.gpc.role', { t: GPU.tpcsPerGpc, s: smPerGpc }),
       kind: 'compute',
       district: 'gpu',
       object: smBody,
@@ -267,13 +268,13 @@ export function createGpu(ctx: WorldContext): GpuModule {
       bounds: bb(cx - w / 2, 0, cz - d / 2, cx + w / 2, ACTIVE + 8, cz + d / 2),
       tier: 2,
       doc: 'gpc',
-      color: 0x7f8cff,
+      color: 'compute',
     })
   }
   ctx.register({
     id: 'gpu.l2',
-    name: 'L2 cache',
-    role: `${GPU.l2MiB} MiB in two partitions`,
+    name: () => t('comp.l2.name'),
+    role: () => t('comp.l2.role', { m: GPU.l2MB }),
     kind: 'memory',
     district: 'gpu',
     object: l2,
@@ -281,7 +282,7 @@ export function createGpu(ctx: WorldContext): GpuModule {
     bounds: bb(-inner, 0, -GPU_PLAN.l2Half, inner, ACTIVE + 4, GPU_PLAN.l2Half),
     tier: 1,
     doc: 'l2',
-    color: 0x4fe3c1,
+    color: 'sram',
   })
   for (const site of STACK_SITES) {
     const edge = site.side === 'west' ? -HX : HX
@@ -290,8 +291,8 @@ export function createGpu(ctx: WorldContext): GpuModule {
     const xb = edge + inward * (GPU_PLAN.phyDepth + GPU_PLAN.mcDepth)
     ctx.register({
       id: `gpu.phy.${site.index}`,
-      name: `HBF PHY ${site.index}`,
-      role: `16 UCIe modules facing stack ${site.index}`,
+      name: () => t('comp.gpuPhy.name', { s: site.index }),
+      role: () => t('comp.gpuPhy.role', { s: site.index }),
       kind: 'link',
       district: 'gpu',
       object: phy,
@@ -299,14 +300,14 @@ export function createGpu(ctx: WorldContext): GpuModule {
       bounds: bb(Math.min(xa, xb), 0, site.z - STACK.width / 2, Math.max(xa, xb), ACTIVE + 4, site.z + STACK.width / 2),
       tier: 2,
       doc: 'gpuPhy',
-      color: 0x6e8dff,
+      color: 'link',
       stack: site.index,
       labelWhen: () => ctx.state.focusStack === site.index,
     })
     ctx.register({
       id: `gpu.mc.${site.index}`,
-      name: `Memory controller ${site.index}`,
-      role: `drives stack ${site.index}'s 16 host channels`,
+      name: () => t('comp.mc.name', { s: site.index }),
+      role: () => t('comp.mc.role', { s: site.index }),
       kind: 'circuit',
       district: 'gpu',
       object: mc,
@@ -314,15 +315,15 @@ export function createGpu(ctx: WorldContext): GpuModule {
       bounds: bb(Math.min(xa, xb), 0, site.z - STACK.width * 0.36, Math.max(xa, xb), ACTIVE + 4, site.z + STACK.width * 0.36),
       tier: 2,
       doc: 'gpuMc',
-      color: 0x8c7ccf,
+      color: 'controller',
       stack: site.index,
       labelWhen: () => ctx.state.focusStack === site.index,
     })
   }
   ctx.register({
     id: 'gpu.nvlink',
-    name: 'NVLink',
-    role: '18 links to other GPUs',
+    name: () => t('comp.nvlink.name'),
+    role: () => t('comp.nvlink.role'),
     kind: 'link',
     district: 'gpu',
     object: nvl,
@@ -330,19 +331,19 @@ export function createGpu(ctx: WorldContext): GpuModule {
     bounds: bb(-inner, 0, HZ - GPU_PLAN.ioDepth, inner, ACTIVE + 3, HZ),
     tier: 1,
     doc: 'nvlink',
-    color: 0x6e8dff,
+    color: 'link',
   })
   ctx.register({
     id: 'gpu.host',
-    name: 'Host interface',
-    role: 'PCIe · where requests enter',
+    name: () => t('comp.host.name'),
+    role: () => t('comp.host.role'),
     kind: 'link',
     district: 'gpu',
     object: host,
     bounds: bb(-inner * 0.55, 0, -HZ, inner * 0.55, ACTIVE + 3, -HZ + GPU_PLAN.ioDepth),
     tier: 1,
     doc: 'host',
-    color: 0x6e8dff,
+    color: 'link',
   })
 
   // Activity scales the themed glow; capture the themed values each frame.

@@ -1,10 +1,11 @@
 /* ============================================================================
  * MODEL PROFILES — derived from the models' public Hugging Face configs.
  *
- * Weights and KV cache are FP8, one byte per element, as in HBFlex. Parameter
- * counts are rebuilt from the config fields (attention projections, dense and
- * expert FFNs, embeddings and LM head; norms and routers are ignored, < 0.1 %).
- * Tests pin the totals to the published sizes.
+ * Weights and KV cache take one byte per element (8-bit, as HBFlex assumes),
+ * with no scale factors. Parameter counts are rebuilt from the config fields
+ * (attention projections, dense and expert FFNs, embeddings and LM head;
+ * norms and routers are ignored, < 0.1 %). Tests pin DeepSeek-V3 and Qwen3 to
+ * their published sizes and Hunyuan3 to its rebuilt 295 B total, 20.1 B active.
  * ==========================================================================*/
 
 export type ModelId = 'deepseek-v3' | 'qwen3-235b' | 'hunyuan3'
@@ -102,7 +103,7 @@ const QWEN3_235B = build('qwen3-235b', 'Qwen3-235B-A22B', 'Qwen/Qwen3-235B-A22B 
 })
 
 /* Hunyuan3 (hy_v3): GQA with 64 query heads, 8 KV heads; first layer dense. */
-const HUNYUAN3 = build('hunyuan3', 'Hunyuan3', 'Tencent Hunyuan3 (hy_v3) config.json', {
+const HUNYUAN3 = build('hunyuan3', 'Hunyuan3', 'Tencent Hy3 (hy_v3) config.json, huggingface.co/tencent/Hy3', {
   hidden: 4096,
   layers: 80,
   denseLayers: 1,

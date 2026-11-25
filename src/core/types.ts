@@ -1,3 +1,4 @@
+import type { PaletteKey } from './theme'
 import type * as THREE from 'three'
 
 /* ============================================================================
@@ -91,9 +92,10 @@ export interface FocusSpec {
 
 export interface ComponentDef {
   id: string
-  name: string
-  /** one-line subtitle, e.g. "core die 7 of 16" */
-  role: string
+  /** display name in the current language */
+  name: () => string
+  /** one-line subtitle in the current language */
+  role: () => string
   kind: ComponentKind
   district: DistrictId
   /** Pickable root. When `instances` is set, the root is a shared InstancedMesh. */
@@ -113,7 +115,8 @@ export interface ComponentDef {
   /** short live readout for the label and inspector header */
   readout?: () => string
   /** semantic colour for the label dot */
-  color?: number
+  /** palette role for the inspector's colour dot; follows the theme */
+  color?: PaletteKey
   /** stack index for stack-scoped components */
   stack?: number
   /** core die index for die-scoped components */

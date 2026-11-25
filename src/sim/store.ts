@@ -3,10 +3,11 @@ import { HBF } from '../core/hbf-spec'
 /* ============================================================================
  * KV STORE — where every KV page lives, on every block of the package.
  *
- * Allocation unit. OCP §11.2.2: "All banks within the same NAND die shall
- * have the same page number for maximum performance." A die therefore takes
- * a write as one multi-plane program across its 32 planes, and a block index
- * is used on all 32 planes together.
+ * Allocation unit. OCP §5.7 derives one block number for all banks of a
+ * channel, and §11.2.2 asks that "All banks within the same NAND die shall
+ * have the same page number for maximum performance." A die therefore takes a
+ * write as one multi-plane program across its 32 planes, and a block index is
+ * used on all 32 planes together.
  *
  * Interleaving. OCP §4.6 and §13 leave it to the host how widely to spread
  * data over its host channels (one die per channel here). A session's KV is
@@ -16,21 +17,30 @@ import { HBF } from '../core/hbf-spec'
  * one die; width 16 spreads it over the whole stack.
  *
  * Weights are striped over every die (OCP §13.3.1) and fill the first block
- * rows of every die. They are never erased.
+ * rows of every die. This store never erases them: data refresh (OCP §11.5,
+ * typically every 24-48 hours and after a read-count limit) is not modelled.
  *
- * Policies (both published):
+ * Policies:
  *   arrival  all requests in a domain share one open superblock in arrival
  *            order; evicting a request reclaims every superblock it touched at
- *            once, copying the other requests' valid pages first. This is the
- *            per-request immediate reclamation HBFlex uses as its baseline.
- *   hbflex   HBFlex's lifetime-labelled packing (requests whose sessions
- *            started in the same window share superblocks) and delayed
- *            reclamation: eviction only marks pages invalid; a domain
- *            reclaims once 95 % of its KV superblocks are written, entirely
- *            invalid superblocks first, until 10 % are free.
+ *            once, copying the other requests' valid pages first. A stand-in
+ *            for the baseline HBFlex compares against, which the paper reports
+ *            (average WAF 11.98x) but does not define.
+ *   hbflex   HBFlex's lifetime-labelled packing (HBFlex §5.4 labels blocks by
+ *            root-request start time; the 10-minute window is this store's
+ *            choice) and delayed reclamation: eviction only marks pages
+ *            invalid, and a domain reclaims once 95 % of its KV superblocks are
+ *            written (HBFlex §5.4: "GC at 95%"). Reclaiming until 10 % are free,
+ *            entirely invalid superblocks first and then the least-valid ones,
+ *            is this store's choice.
+ *
+ * No page is ever dropped. GC copies need somewhere to go, so hbflex keeps
+ * GC_RESERVE free superblocks per domain that host writes may not take; a
+ * write that finds no room is refused and stays in base-die SRAM until it fits.
  *
  * Free superblocks are taken in queue order and nothing here looks at erase
- * counts: this store shows what wear looks like without wear leveling.
+ * counts: this store shows what wear looks like without wear leveling, which
+ * OCP §11.4 recommends enabling in the base die or the host.
  * ==========================================================================*/
 
 export const DIES = HBF.stacksPerGpu * HBF.diesPerStack
@@ -53,19 +63,10 @@ export enum SbState {
 
 export type PolicyId = 'arrival' | 'hbflex'
 
-export const POLICIES: Record<PolicyId, { name: string; short: string; detail: string }> = {
-  arrival: {
-    name: 'Arrival order, immediate reclaim',
-    short: 'Arrival order',
-    detail:
-      'Requests share blocks in arrival order. Evicting a request erases every block it touched, copying other requests’ pages first (HBFlex’s baseline).',
-  },
-  hbflex: {
-    name: 'HBFlex: lifetime packing, delayed reclaim',
-    short: 'HBFlex packing',
-    detail:
-      'Sessions that started in the same 10-minute window share blocks. Eviction only invalidates pages; a domain erases once 95 % of its blocks are written (HBFlex).',
-  },
+/** Block-allocation policies. The interface text for each lives in core/i18n (pol.*). */
+export const POLICIES: Record<PolicyId, { name: string }> = {
+  arrival: { name: 'Arrival order, immediate reclaim (stand-in for HBFlex’s baseline)' },
+  hbflex: { name: 'HBFlex: lifetime packing, delayed reclaim' },
 }
 
 /** HBFlex reclaim thresholds, as fractions of a domain's KV superblocks. */
@@ -79,6 +80,8 @@ export const LABEL_WINDOW = 600
  * slots close blocks nearly empty and then erase them for almost no data.
  */
 export const MAX_OPEN = 8
+/** Free superblocks per domain kept for GC copies under hbflex; host writes may not take them. */
+export const GC_RESERVE = 2
 const GC_LABEL = -1
 
 /** Dies of a domain: stack-major, strided so a domain's dies interleave in the stack. */
@@ -91,6 +94,18 @@ export function domainDies(width: InterleaveWidth, domain: number): number[] {
   return out
 }
 
+const tables = new Map<InterleaveWidth, readonly (readonly number[])[]>()
+
+/** domainDies for every domain, built once per width; safe in per-frame code. */
+export function domainDieTable(width: InterleaveWidth): readonly (readonly number[])[] {
+  let tab = tables.get(width)
+  if (!tab) {
+    tab = Array.from({ length: DIES / width }, (_, d) => domainDies(width, d))
+    tables.set(width, tab)
+  }
+  return tab
+}
+
 export interface StoreStats {
   /** stripe-pages programmed for host KV writes (padding included) */
   hostPages: number
@@ -100,6 +115,10 @@ export interface StoreStats {
   erases: number
   validPages: number
   writtenPages: number
+  /** erase count of the most-erased KV superblock */
+  maxErase: number
+  /** stripe-pages a write asked for and could not place (they stay in SRAM) */
+  refusedPages: number
 }
 
 export interface Store {
@@ -124,6 +143,10 @@ export interface Store {
   readonly dirty: Int32Array
   readonly dirtyCount: number
   freeCount(domain: number): number
+  /** stripe-pages per superblock (pages per block) */
+  readonly pagesPerSuperblock: number
+  /** unwritten pages at the end of every open superblock: writable without an erase */
+  openTailPages(): number
   write(req: number, domain: number, label: number, pages: number, now: number): number
   /** Invalidate every page of a request. Immediate-reclaim policies erase here. */
   invalidate(req: number, now: number): void
@@ -155,7 +178,7 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
   const freeLen = new Int32Array(domains)
   const open: Map<number, number>[] = Array.from({ length: domains }, () => new Map())
 
-  const stats: StoreStats = { hostPages: 0, gcPages: 0, erases: 0, validPages: 0, writtenPages: 0 }
+  const stats: StoreStats = { hostPages: 0, gcPages: 0, erases: 0, validPages: 0, writtenPages: 0, maxErase: 0, refusedPages: 0 }
   const domProgram = new Float64Array(domains)
   const domErase = new Float64Array(domains)
   const domGc = new Float64Array(domains)
@@ -291,6 +314,7 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
     written[sb] = 0
     valid[sb] = 0
     erase[sb]++
+    if (erase[sb] > stats.maxErase) stats.maxErase = erase[sb]
     state[sb] = SbState.Free
     stats.erases++
     domErase[Math.floor(sb / BLOCKS)]++
@@ -298,10 +322,11 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
     mark(sb)
   }
 
-  function openFor(d: number, lab: number, now: number): number {
+  function openFor(d: number, lab: number, now: number, gc: boolean): number {
     const m = open[d]
     const cur = m.get(lab)
     if (cur !== undefined) return cur
+    if (!gc && policy === 'hbflex' && freeLen[d] <= GC_RESERVE) return -1
     if (m.size >= MAX_OPEN) {
       let oldest = Infinity
       for (const k of m.keys()) if (k !== GC_LABEL && k < oldest) oldest = k
@@ -321,10 +346,10 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
   function program(req: number, d: number, lab: number, pages: number, now: number, gc: boolean): number {
     let left = pages
     while (left > 0) {
-      let sb = openFor(d, lab, now)
+      let sb = openFor(d, lab, now, gc)
       if (sb < 0 && policy === 'hbflex' && !reclaiming[d]) {
         reclaimDomain(d, now, true)
-        sb = openFor(d, lab, now)
+        sb = openFor(d, lab, now, gc)
       }
       if (sb < 0) break
       const take = Math.min(left, PAGES_PER_SB - written[sb])
@@ -359,6 +384,13 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
     return best
   }
 
+  /** Pages a GC copy could land on in domain `d` right now: free superblocks and the open GC tail. */
+  function gcRoom(d: number): number {
+    const lab = policy === 'hbflex' ? GC_LABEL : 0
+    const cur = open[d].get(lab)
+    return freeLen[d] * PAGES_PER_SB + (cur !== undefined ? PAGES_PER_SB - written[cur] : 0)
+  }
+
   /** Copy every valid page out of `sb` (same domain where possible), then erase it. */
   function collect(sb: number, now: number): void {
     const d = Math.floor(sb / BLOCKS)
@@ -378,22 +410,27 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
       r = n
     }
     for (let i = 0; i < reqs.length; i++) {
-      const lost = program(reqs[i], d, lab, pages[i], now, true)
-      if (lost > 0) {
+      let left = program(reqs[i], d, lab, pages[i], now, true)
+      if (left > 0) {
         const alt = mostFree(d)
-        if (alt >= 0) program(reqs[i], alt, lab, lost, now, true)
+        if (alt >= 0) left = program(reqs[i], alt, lab, left, now, true)
       }
+      // callers check room first; this would be a modelling error, not a policy outcome
+      if (left > 0) throw new Error(`GC copy of ${left} pages found no room`)
     }
     eraseSb(sb)
   }
 
   function reclaimDomain(d: number, now: number, urgent: boolean): number {
     const startAt = Math.ceil(kvPerDomain * RECLAIM_START_FREE)
-    const stopAt = Math.ceil(kvPerDomain * RECLAIM_STOP_FREE)
+    // an urgent call (a write found no block) only needs room for that write;
+    // the background pass refills to the full target
+    const stopAt = urgent ? Math.min(GC_RESERVE + 2, Math.ceil(kvPerDomain * RECLAIM_STOP_FREE)) : Math.ceil(kvPerDomain * RECLAIM_STOP_FREE)
     if (reclaiming[d] || (!urgent && freeLen[d] >= startAt)) return 0
     reclaiming[d] = 1
     try {
       let n = 0
+      let copies = 0
       while (freeLen[d] < stopAt) {
         // entirely invalid closed superblocks first, oldest first
         let pick = -1
@@ -408,8 +445,9 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
         if (pick >= 0) {
           eraseSb(pick)
         } else {
-          // otherwise the least-valid closed superblock, if at most half valid
-          let best = PAGES_PER_SB / 2 + 1
+          // otherwise the least-valid closed superblock: copying it out still
+          // frees space as long as some of its pages are stale
+          let best: number = PAGES_PER_SB
           for (let b = weightRows; b < BLOCKS; b++) {
             const sb = d * BLOCKS + b
             if (state[sb] === SbState.Closed && valid[sb] < best) {
@@ -417,8 +455,10 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
               best = valid[sb]
             }
           }
-          if (pick < 0) break
+          if (pick < 0 || valid[pick] > gcRoom(d)) break
           collect(pick, now)
+          // bound the work of one call; the next pass carries on
+          if (++copies >= 64) break
         }
         n++
       }
@@ -436,6 +476,7 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
       const alt = mostFree(d)
       if (alt >= 0) left = program(req, alt, useLabel, left, now, false)
     }
+    stats.refusedPages += left
     return left
   }
 
@@ -458,7 +499,8 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
         if (valid[sb] === 0) {
           if (state[sb] === SbState.Open) closeSb(sb, now)
           eraseSb(sb)
-        } else collect(sb, now)
+        } else if (valid[sb] <= gcRoom(Math.floor(sb / BLOCKS)) || mostFree(-1) >= 0) collect(sb, now)
+        // else: no room to copy into yet; the block stays and is reclaimed when it empties
       }
     }
   }
@@ -523,6 +565,12 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
       return dirtyCount
     },
     freeCount: (d) => freeLen[d],
+    pagesPerSuperblock: PAGES_PER_SB,
+    openTailPages() {
+      let n = 0
+      for (const m of open) for (const sb of m.values()) n += PAGES_PER_SB - written[sb]
+      return n
+    },
     write,
     invalidate,
     reclaim,

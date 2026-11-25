@@ -27,7 +27,8 @@ describe('HBF device arithmetic', () => {
   })
 
   it('derives the array-limited read bandwidth from planes, page size and tR', () => {
-    // 512 planes x 4 KiB / 4 µs = 524.288 GB/s, i.e. HBFlex's 488 GiB/s
+    // 512 planes x 4 KiB / 4 µs = 524.288 GB/s = 488.28 GiB/s. HBFlex quotes "488 GB/s per
+    // stack, or 2.93 TB/s across six": the digits match the GiB/s figure, so the unit is ambiguous.
     expect(stackArrayReadBps()).toBeCloseTo(524.288e9, 0)
     expect(stackArrayReadBps() / GiB).toBeCloseTo(488.28, 1)
   })

@@ -1,6 +1,5 @@
 import * as THREE from 'three'
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
-import { cssHex } from '../core/theme'
 import type { Registry } from '../core/registry'
 import type { Bus, ComponentDef } from '../core/types'
 
@@ -17,6 +16,8 @@ import type { Bus, ComponentDef } from '../core/types'
 
 export interface Labels {
   update(camera: THREE.PerspectiveCamera, enabled: boolean): void
+  /** re-read every tag's text, e.g. after a language change */
+  relabel(): void
   render(scene: THREE.Scene, camera: THREE.Camera): void
   resize(w: number, h: number): void
   setHighlight(id: string | null): void
@@ -29,8 +30,8 @@ interface Tag {
   def: ComponentDef
   obj: CSS2DObject
   el: HTMLElement
+  name: HTMLElement
   readout: HTMLElement | null
-  shown: boolean
 }
 
 const _box = new THREE.Box3()
@@ -51,10 +52,10 @@ export function createLabels(root: HTMLElement, registry: Registry, bus: Bus): L
     el.dataset.id = def.id
     const dot = document.createElement('span')
     dot.className = 'tag__dot'
-    if (def.color !== undefined) dot.style.background = cssHex(def.color)
+    if (def.color !== undefined) dot.style.background = `var(--c-${def.color})`
     const name = document.createElement('span')
     name.className = 'tag__name'
-    name.textContent = def.name
+    name.textContent = def.name()
     el.append(dot, name)
     let readout: HTMLElement | null = null
     if (def.readout) {
@@ -76,7 +77,7 @@ export function createLabels(root: HTMLElement, registry: Registry, bus: Bus): L
     obj.center.set(0.5, 1.15)
     obj.visible = false
     group.add(obj)
-    tags.push({ def, obj, el, readout, shown: false })
+    tags.push({ def, obj, el, name, readout })
   }
 
   const candidates: { tag: Tag; d: number }[] = []
@@ -115,6 +116,9 @@ export function createLabels(root: HTMLElement, registry: Registry, bus: Bus): L
 
   return {
     update,
+    relabel() {
+      for (const tag of tags) tag.name.textContent = tag.def.name()
+    },
     render(scene, camera) {
       if (group.parent !== scene) scene.add(group)
       css.render(scene, camera)

@@ -16,9 +16,12 @@ describe('model profiles rebuilt from public configs', () => {
     expect(activeBytesPerToken(MODELS['deepseek-v3']) / B).toBeLessThan(38)
     expect(activeBytesPerToken(MODELS['qwen3-235b']) / B).toBeGreaterThan(21)
     expect(activeBytesPerToken(MODELS['qwen3-235b']) / B).toBeLessThan(23)
+    // Hunyuan3 has no published total here: pin the rebuild from its config
+    expect(MODELS.hunyuan3.weightBytes / B).toBeCloseTo(295, 0)
+    expect(activeBytesPerToken(MODELS.hunyuan3) / B).toBeCloseTo(20.1, 1)
   })
 
-  it('give FP8 KV bytes per token from the attention layout', () => {
+  it('give 8-bit KV bytes per token from the attention layout', () => {
     expect(MODELS['deepseek-v3'].kvBytesPerToken).toBe(35136)
     expect(MODELS['qwen3-235b'].kvBytesPerToken).toBe(96256)
     expect(MODELS.hunyuan3.kvBytesPerToken).toBe(163840)
@@ -219,8 +222,73 @@ describe('serving simulator', () => {
     const hbflex = createSim({ model: 'qwen3-235b', workload: 'toC', policy: 'hbflex', load: 1, seed: 9 })
     arrival.run(3 * 3600)
     hbflex.run(3 * 3600)
-    expect(arrival.waf()).toBeGreaterThan(hbflex.waf())
-    expect(hbflex.waf()).toBeLessThan(1.3)
+    expect(arrival.waf()).toBeGreaterThan(2 * hbflex.waf())
+    // at full trace load, about twice what one GPU sustains, GC copies a third extra
+    expect(hbflex.waf()).toBeLessThan(1.5)
     arrival.store.check()
+    hbflex.store.check()
   })
+
+  it('never loses a page when a domain runs out of room, so write amplification stays at least 1', () => {
+    // Hunyuan3 Thinking over 16 dies used to deadlock reclaim and drop terabytes
+    const sim = createSim({ model: 'hunyuan3', workload: 'thinking', policy: 'hbflex', width: 16, load: suggestedLoad('hunyuan3', 'thinking', 16), seed: 3 })
+    sim.run(6 * 3600)
+    const st = sim.store.stats
+    const physical = (st.hostPages + st.gcPages) * sim.store.stripeBytes
+    expect(physical + sim.metrics.sramBytes).toBeGreaterThanOrEqual(sim.logicalBytes() * 0.999)
+    expect(sim.waf()).toBeGreaterThanOrEqual(0.99)
+    sim.store.check()
+  })
+
+  it('runs 1x at one simulated second per wall second, whole iterations or not', () => {
+    const sim = createSim({ model: 'deepseek-v3', workload: 'toC', load: suggestedLoad('deepseek-v3', 'toC'), seed: 5 })
+    sim.run(1800)
+    const start = sim.now
+    for (let f = 0; f < 600; f++) sim.step(1 / 60, 1, 1e9)
+    expect(sim.now - start).toBeGreaterThan(9.5)
+    expect(sim.now - start).toBeLessThan(10.6)
+    const s2 = sim.now
+    for (let f = 0; f < 60; f++) sim.step(1 / 60, 600, 1e9)
+    expect(sim.now - s2).toBeGreaterThan(590)
+    expect(sim.now - s2).toBeLessThan(612)
+  })
+
+  it('splits capacity into valid, awaiting erase and free, which add up', () => {
+    const sim = createSim({ model: 'hunyuan3', workload: 'thinking', load: suggestedLoad('hunyuan3', 'thinking'), seed: 4 })
+    sim.run(2 * 3600)
+    const c = sim.capacity()
+    expect(c.valid + c.reclaimable + c.free).toBeCloseTo(1, 9)
+    expect(c.free).toBeGreaterThanOrEqual(0)
+    expect(c.reclaimable).toBeGreaterThanOrEqual(0)
+  })
+
+  it('projects first wear-out only once it has an hour of history, from the hottest block', () => {
+    const sim = createSim({ model: 'qwen3-235b', workload: 'toC', policy: 'arrival', load: 1, seed: 9 })
+    sim.run(1800)
+    expect(sim.wear().lifeSeconds).toBeNaN()
+    sim.run(3 * 3600)
+    const w = sim.wear()
+    expect(w.max).toBeGreaterThan(0)
+    expect(Number.isFinite(w.lifeSeconds)).toBe(true)
+    // the hottest block cannot wear faster than it was erased in the window
+    expect(w.rate).toBeGreaterThan(0)
+    expect(w.lifeSeconds).toBeCloseTo((HBF.peCycles - w.max) / w.rate, 3)
+  })
+})
+
+describe('suggested load', () => {
+  // The load the scenario card calls "what one GPU sustains" must be sustained
+  // for every model and workload, through the cache filling and turning over.
+  for (const model of ['deepseek-v3', 'qwen3-235b', 'hunyuan3'] as const) {
+    it(`is sustained by ${model} on every workload for eight hours`, () => {
+      for (const w of ['toC', 'toB', 'coding', 'thinking'] as const) {
+        const load = suggestedLoad(model, w)
+        const sim = createSim({ model, workload: w, load, seed: 11 })
+        sim.run(8 * 3600)
+        expect(sim.metrics.dropped, `${model} ${w} at ${load}`).toBe(0)
+        expect(sim.metrics.queue, `${model} ${w} at ${load}`).toBeLessThan(200)
+        sim.store.check()
+      }
+    }, 180_000)
+  }
 })

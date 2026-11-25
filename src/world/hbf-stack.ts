@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { HBF, UCIE, channelOfDie } from '../core/hbf-spec'
-import { signal, surface } from '../core/theme'
+import { t } from '../core/i18n'
+import { signal, surface, type PaletteKey } from '../core/theme'
 import type { SceneState, WorldContext, WorldModule } from '../core/types'
 import { clamp, damp } from '../core/util'
 import { createCoreDieMaterial } from './die-material'
@@ -46,12 +47,30 @@ export interface StacksModule extends WorldModule {
   coreDies: THREE.InstancedMesh
   baseDies: THREE.InstancedMesh
   setSelectedDie(stack: number, die: number): void
+  /**
+   * The NAND block under a ray hit on a core die's top face, by the same
+   * floor-plan arithmetic as the die shader; null off the block array.
+   */
+  blockAt(hit: THREE.Intersection): BlockHit | null
   /** drive TSV pulses from per-die activity; call every frame */
   setActivity(activity: Activity, wallDt: number): void
 }
 
 const N_DIES = HBF.diesPerStack
 const N_STACKS = HBF.stacksPerGpu
+
+export interface BlockHit {
+  stack: number
+  /** die within its stack, 0 = bottom */
+  die: number
+  /** die index across the package, stack x 16 + die */
+  global: number
+  plane: number
+  block: number
+}
+
+const _hitM = new THREE.Matrix4()
+const _hitP = new THREE.Vector3()
 
 /** Signal-TSV columns drawn per stack: two rows along the centre strip. */
 const SIG_COLS = 24
@@ -114,7 +133,7 @@ function baseBlocks(site: StackSite): Record<'phy' | 'ctrl' | 'sram' | 'landing'
   const land = ux(BASE_PLAN.tsvU[0], BASE_PLAN.tsvU[1])
   out.landing.push({ stack: s, x: land.x, z: site.z, sx: land.sx, sz: DIE_PLAN.spineHalf * 2 * STACK.width * 0.8, h: 0.28 })
 
-  // SRAM: 40 MiB per stack (HBFlex), drawn as 2 x 6 x 4 banks.
+  // SRAM: 40 MB per stack (HBFlex §4.1), drawn as 2 x 6 x 4 banks.
   const sramCols = 6
   const sramRows = 4
   const [su0, su1] = BASE_PLAN.sramU
@@ -299,8 +318,8 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
 
     ctx.register({
       id: `stack.${s}`,
-      name: `HBF stack ${s}`,
-      role: `${site.side} side · 16 core dies on a base die`,
+      name: () => t('comp.stack.name', { s }),
+      role: () => t('comp.stack.role', { side: t(`side.${site.side}`) }),
       kind: 'die',
       district: 'stack',
       object: coreDies,
@@ -308,13 +327,13 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
       bounds: (out) => out.set(_p.set(minX, 0, minZ), _s.set(maxX, L.top, maxZ)),
       tier: 0,
       doc: 'stack',
-      color: 0xa9dcff,
+      color: 'kv',
       stack: s,
     })
     ctx.register({
       id: `stack.${s}.base`,
-      name: 'Base die',
-      role: `stack ${s} · logic die on the interposer`,
+      name: () => t('comp.base.name'),
+      role: () => t('comp.base.role', { s }),
       kind: 'circuit',
       district: 'stack',
       object: baseDies,
@@ -337,18 +356,19 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
       }
       return out
     }
-    const parts: [keyof typeof blocks, string, string, string, number][] = [
-      ['phy', 'UCIe PHY (16 modules)', 'one x64 module per host channel', 'phy', 0x6e8dff],
-      ['ctrl', 'Channel controllers', 'scheduling, ECC, write accumulation', 'ctrl', 0x8c7ccf],
-      ['sram', 'Base-die SRAM', '40 MiB staging and scratchpad', 'sram', 0x4fe3c1],
-      ['landing', 'NAND-side PHY', 'TSV landing for the core dies', 'landing', 0xb86b3c],
-      ['debug', 'Test & debug', 'DA port, TSV repair, IEEE 1500/1149.1, BIST', 'debug', 0x5f6b80],
+    const parts: [keyof typeof blocks, PaletteKey][] = [
+      ['phy', 'link'],
+      ['ctrl', 'controller'],
+      ['sram', 'sram'],
+      ['landing', 'copper'],
+      ['debug', 'debug'],
     ]
-    for (const [k, name, role, doc, color] of parts) {
+    for (const [k, color] of parts) {
+      const doc = k
       ctx.register({
         id: `stack.${s}.${k}`,
-        name,
-        role: `stack ${s} · ${role}`,
+        name: () => t(`comp.${k}.name`),
+        role: () => t(`comp.${k}.role`, { s }),
         kind: k === 'sram' ? 'memory' : 'circuit',
         district: 'stack',
         object: blockMeshes[k],
@@ -364,8 +384,8 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
     for (let d = 0; d < N_DIES; d++) {
       ctx.register({
         id: `stack.${s}.die.${d}`,
-        name: `Core die ${d}`,
-        role: `stack ${s} · host channel ${channelOfDie(d)} · 32 planes`,
+        name: () => t('comp.die.name', { d }),
+        role: () => t('comp.die.role', { s, c: channelOfDie(d) }),
         kind: 'array',
         district: 'stack',
         object: coreDies,
@@ -376,7 +396,7 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
         },
         tier: 2,
         doc: 'coreDie',
-        color: 0x3fc8ff,
+        color: 'kv',
         stack: s,
         die: d,
         labelWhen: () => focused() && (ctx.state.explode[s] > 0.55 || ctx.state.liftedDie[s] === d),
@@ -384,8 +404,8 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
     }
     ctx.register({
       id: `stack.${s}.tsv`,
-      name: 'Through-silicon vias',
-      role: `stack ${s} · signal strip and power rows (sampled)`,
+      name: () => t('comp.tsv.name'),
+      role: () => t('comp.tsv.role', { s }),
       kind: 'link',
       district: 'stack',
       object: sigTsv,
@@ -393,14 +413,14 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
       bounds: (out) => out.set(_p.set(minX, L.baseTop, site.z - 4), _s.set(maxX, L.top, site.z + 4)),
       tier: 2,
       doc: 'tsv',
-      color: 0xa9dcff,
+      color: 'tsv',
       stack: s,
       labelWhen: opened,
     })
     ctx.register({
       id: `stack.${s}.tsvPower`,
-      name: 'Power TSVs',
-      role: `stack ${s} · supply columns along both long edges (sampled)`,
+      name: () => t('comp.tsvPower.name'),
+      role: () => t('comp.tsvPower.role', { s }),
       kind: 'link',
       district: 'stack',
       object: pwrTsv,
@@ -408,7 +428,7 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
       bounds: (out) => out.set(_p.set(minX, L.baseTop, minZ), _s.set(maxX, L.top, maxZ)),
       tier: 2,
       doc: 'tsvPower',
-      color: 0xb86b3c,
+      color: 'copper',
       stack: s,
     })
   }
@@ -462,6 +482,32 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
     update,
     setSelectedDie(stack: number, die: number) {
       coreMat.setSelectedDie(stack < 0 || die < 0 ? -1 : stack * N_DIES + die)
+    },
+    blockAt(hit) {
+      const i = hit.instanceId
+      if (hit.object !== coreDies || i === undefined || !hit.face || hit.face.normal.y < 0.5) return null
+      // into the unit box the shader works in
+      coreDies.getMatrixAt(i, _hitM)
+      _hitM.premultiply(coreDies.matrixWorld).invert()
+      _hitP.copy(hit.point).applyMatrix4(_hitM)
+      const u = 0.5 + aFlip[i] * _hitP.x
+      const v = _hitP.z + 0.5
+      const [pu0, pu1] = DIE_PLAN.planeU
+      if (u < pu0 || u >= pu1) return null
+      const cols = HBF.planesPerDie / 2
+      const uu = ((u - pu0) / (pu1 - pu0)) * cols
+      const col = Math.floor(uu)
+      const pu = uu - col
+      const g = DIE_PLAN.gutter
+      if (pu < g || pu > 1 - g) return null
+      const ap = (pu - g) / (1 - 2 * g)
+      if (ap < DIE_PLAN.staircase || ap > 1 - DIE_PLAN.staircase) return null
+      const row = v < 0.5 ? 0 : 1
+      const [r0, r1] = DIE_PLAN.rowV[row]
+      // blocks count outward from the TSV strip in both rows, as in the shader
+      const pv = row === 0 ? (r1 - v) / (r1 - r0) : (v - r0) / (r1 - r0)
+      if (pv < 0 || pv >= 1) return null
+      return { stack: Math.floor(i / N_DIES), die: i % N_DIES, global: i, plane: row * cols + col, block: Math.floor(pv * HBF.blocksPerPlane) }
     },
     setActivity(act, wallDt) {
       tsvMat.tick(wallDt)

@@ -2,20 +2,25 @@ import * as THREE from 'three'
 import type { ThemeMode } from './types'
 
 /* ============================================================================
- * THEME — two rendering models over one scene.
+ * THEME — two rendering models over one scene: dark ("night" in code) and
+ * light ("day").
  *
- * NIGHT: structure is matte and dark; meaning is emissive. Only semantic
- * surfaces (data in blocks, SRAM, links, compute) are allowed past the bloom
- * threshold, so a glow always says something.
+ * DARK: structure is matte and dark; meaning is emissive. Only semantic
+ * surfaces (data in blocks, SRAM, links, compute) glow, and gently, so a
+ * glow always says something without glare.
  *
- * DAY: a clean bench-light render. Bloom is off; hue and value carry meaning
- * and the package reads as physical material: dark substrate, grey silicon,
- * copper vias.
+ * LIGHT: a clean bench-light render. Bloom is off; hue and value carry
+ * meaning and the package reads as physical material: dark substrate, grey
+ * silicon, copper vias.
  *
  * Colour is semantic everywhere and is never reused for decoration:
- *   weights amber · KV cache cyan · open KV block green · invalid pink ·
- *   free grey · SRAM teal · compute periwinkle · UCIe link blue ·
- *   TSV ice-blue · controllers violet-grey
+ *   weights amber · valid KV blue · KV being written light blue ·
+ *   invalid KV pink · free grey · SRAM aqua · compute violet ·
+ *   UCIe and other links copper-orange · TSVs steel · controllers violet-grey
+ * The block-state colours were checked with a colour-vision validator in
+ * both modes: every pair stays apart for deuteranopia, protanopia and
+ * normal vision. Wear is a single-hue (orange) ramp, light to dark by day
+ * and dark to bright by night.
  * ==========================================================================*/
 
 export interface Palette {
@@ -60,11 +65,11 @@ export interface Palette {
 
 export const PALETTES: Record<ThemeMode, Palette> = {
   night: {
-    bg: 0x050913,
-    fog: 0x0a1222,
-    skyZenith: 0x03060f,
-    skyHorizon: 0x1a2a46,
-    skyGlow: 0x2e2445,
+    bg: 0x060a12,
+    fog: 0x0a111e,
+    skyZenith: 0x03060d,
+    skyHorizon: 0x16223a,
+    skyGlow: 0x231f38,
     board: 0x07100f,
     boardTrace: 0x0f2a24,
     substrate: 0x0f1d19,
@@ -82,28 +87,28 @@ export const PALETTES: Record<ThemeMode, Palette> = {
     bond: 0x07090d,
     ghost: 0x6f8cc0,
     ghostEdge: 0x5d7fb8,
-    weights: 0xffb03a,
-    kv: 0x3fc8ff,
-    kvTail: 0x7dffb2,
-    invalid: 0xff4d8d,
-    free: 0x1c2638,
-    sram: 0x4fe3c1,
-    compute: 0x6f7dff,
-    computeDim: 0x1c2140,
-    tensor: 0xb39cff,
-    link: 0x6e8dff,
-    tsv: 0xa9dcff,
-    controller: 0x8c7ccf,
+    weights: 0xd89a2b,
+    kv: 0x3d8be6,
+    kvTail: 0x86bbf8,
+    invalid: 0xe07aa8,
+    free: 0x1c2433,
+    sram: 0x22a477,
+    compute: 0x8f84ea,
+    computeDim: 0x1d1e38,
+    tensor: 0xb6aef5,
+    link: 0xe0703a,
+    tsv: 0x9fb2cc,
+    controller: 0x8781b5,
     debug: 0x5f6b80,
-    ink: 0xe8f1ff,
-    inkDim: 0x8fa5c4,
+    ink: 0xe8eef8,
+    inkDim: 0x93a3ba,
   },
   day: {
-    bg: 0xc9d3de,
-    fog: 0xc3ccd6,
-    skyZenith: 0x6f93bb,
-    skyHorizon: 0xd9e2ea,
-    skyGlow: 0xffe1b8,
+    bg: 0xd3dae2,
+    fog: 0xccd4dc,
+    skyZenith: 0x7a9bc0,
+    skyHorizon: 0xdfe6ec,
+    skyGlow: 0xffe6c4,
     board: 0x1d3a2e,
     boardTrace: 0x2c5a44,
     substrate: 0x263a32,
@@ -121,18 +126,18 @@ export const PALETTES: Record<ThemeMode, Palette> = {
     bond: 0x23262b,
     ghost: 0x8fa7c8,
     ghostEdge: 0x4d6a94,
-    weights: 0xd18a04,
-    kv: 0x0b7fd1,
-    kvTail: 0x1f9e5a,
-    invalid: 0xd0306a,
-    free: 0xb7bcc4,
-    sram: 0x0e8f8c,
-    compute: 0x4f5fd6,
+    weights: 0xe3a21a,
+    kv: 0x2a78d6,
+    kvTail: 0x7fb3f2,
+    invalid: 0xe87ba4,
+    free: 0xc3c8cf,
+    sram: 0x1baf7a,
+    compute: 0x6250d6,
     computeDim: 0x6d7392,
-    tensor: 0x7a54d6,
-    link: 0x3550c8,
-    tsv: 0x3f6f9a,
-    controller: 0x6a5aa8,
+    tensor: 0x8f82e6,
+    link: 0xeb6834,
+    tsv: 0x6f8296,
+    controller: 0x6a62a0,
     debug: 0x7b8494,
     ink: 0x18222e,
     inkDim: 0x5d6b7a,
@@ -181,10 +186,10 @@ export const ATMOSPHERE: Record<ThemeMode, Atmosphere> = {
     fillPos: [-620, 340, 560],
     shadows: false,
     bloom: true,
-    bloomStrength: 0.7,
-    bloomRadius: 0.5,
-    bloomThreshold: 0.82,
-    glow: 1.55,
+    bloomStrength: 0.5,
+    bloomRadius: 0.45,
+    bloomThreshold: 0.86,
+    glow: 1.2,
     daylight: false,
     stars: true,
   },
@@ -219,16 +224,22 @@ export const ATMOSPHERE: Record<ThemeMode, Atmosphere> = {
 
 const STORAGE_KEY = 'hbfcity.theme'
 
-function readStoredMode(): ThemeMode {
+/** The visitor's explicit choice, if any; 'day' | 'night', or null to follow the system. */
+function readStoredMode(): ThemeMode | null {
   try {
     const v = typeof localStorage === 'undefined' ? null : localStorage.getItem(STORAGE_KEY)
-    return v === 'day' ? 'day' : 'night'
+    return v === 'day' || v === 'night' ? v : null
   } catch {
-    return 'night'
+    return null
   }
 }
 
-let mode: ThemeMode = readStoredMode()
+const systemQuery =
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: light)') : null
+const systemMode = (): ThemeMode => (systemQuery?.matches ? 'day' : 'night')
+
+let chosen = readStoredMode()
+let mode: ThemeMode = chosen ?? systemMode()
 
 /** Live palette. Mutated in place on a mode switch so holders keep a valid ref. */
 export const P: Palette = { ...PALETTES[mode] }
@@ -261,15 +272,22 @@ export function onThemeMode(fn: (m: ThemeMode) => void): () => void {
   return () => listeners.delete(fn)
 }
 
-export function setThemeMode(next: ThemeMode): void {
+/**
+ * Switch mode. `remember` stores it as the visitor's choice (the toolbar);
+ * otherwise the page keeps following the system setting.
+ */
+export function setThemeMode(next: ThemeMode, remember = true): void {
+  if (remember) {
+    chosen = next
+    try {
+      localStorage.setItem(STORAGE_KEY, next)
+    } catch {
+      /* private mode: the choice simply does not persist */
+    }
+  }
   if (next === mode) return
   mode = next
   Object.assign(P, PALETTES[next])
-  try {
-    localStorage.setItem(STORAGE_KEY, next)
-  } catch {
-    /* private mode: the choice simply does not persist */
-  }
   if (typeof document !== 'undefined') document.documentElement.dataset.theme = next
   const air = ATMOSPHERE[next]
   for (const p of painters) p(next, P, air)
@@ -280,6 +298,11 @@ export function toggleThemeMode(): ThemeMode {
   setThemeMode(mode === 'night' ? 'day' : 'night')
   return mode
 }
+
+// Until the visitor picks a mode, follow the operating system live.
+systemQuery?.addEventListener?.('change', () => {
+  if (chosen === null) setThemeMode(systemMode(), false)
+})
 
 /* ---------------------------------------------------------------------------
  * Material helpers.
@@ -369,15 +392,13 @@ export function cssHex(hex: number): string {
   return `#${hex.toString(16).padStart(6, '0')}`
 }
 
-export function mixHex(a: number, b: number, t: number): number {
-  const ar = (a >> 16) & 255
-  const ag = (a >> 8) & 255
-  const ab = a & 255
-  const br = (b >> 16) & 255
-  const bg = (b >> 8) & 255
-  const bb = b & 255
-  const r = Math.round(ar + (br - ar) * t)
-  const g = Math.round(ag + (bg - ag) * t)
-  const bl = Math.round(ab + (bb - ab) * t)
-  return (r << 16) | (g << 8) | bl
+/**
+ * Mirror the live palette into CSS custom properties (--c-<role>), so DOM
+ * swatches such as label and inspector dots follow the theme with no repaint.
+ */
+if (typeof document !== 'undefined') {
+  themed((_m, p) => {
+    const st = document.documentElement.style
+    for (const k of Object.keys(p) as PaletteKey[]) st.setProperty(`--c-${k}`, cssHex(p[k]))
+  })
 }

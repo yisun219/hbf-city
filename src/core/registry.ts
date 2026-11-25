@@ -64,12 +64,12 @@ export class Registry {
     if (!needle) return []
     const scored: { d: ComponentDef; s: number }[] = []
     for (const d of this.ordered) {
-      const name = d.name.toLowerCase()
+      const name = d.name().toLowerCase()
       let s = -1
       if (name === needle || d.id === needle) s = 1000
       else if (name.startsWith(needle)) s = 500 - name.length
       else if (name.includes(needle)) s = 250 - name.length
-      else if (d.role.toLowerCase().includes(needle)) s = 100
+      else if (d.role().toLowerCase().includes(needle)) s = 100
       if (s > 0) scored.push({ d, s })
     }
     scored.sort((a, b) => b.s - a.s)
