@@ -96,7 +96,7 @@ export function createHud(root: HTMLElement, state: SceneState, bus: Bus, act: H
   const bulkBtn = button(t('tb.silicon'), t('tb.silicon.title'), act.toggleBulk)
   const scaleBtn = button('', t('tb.scale.title'), act.toggleScale)
   put(
-    el('nav', { class: 'toolbar', 'aria-label': 'View' },
+    el('nav', { class: 'toolbar', 'aria-label': t('tb.aria') },
       button(t('tb.tour'), t('tb.tour.title'), act.tour, 'btn--accent'),
       themeSeg,
       labelsBtn,

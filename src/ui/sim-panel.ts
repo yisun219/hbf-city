@@ -57,7 +57,7 @@ function clock(seconds: number): string {
   const m = Math.floor((seconds % 3600) / 60)
   const s = Math.floor(seconds % 60)
   const two = (n: number) => String(n).padStart(2, '0')
-  return `${d > 0 ? `${d}d ` : ''}${two(h)}:${two(m)}:${two(s)}`
+  return `${d > 0 ? `${t('clock.days', { d })} ` : ''}${two(h)}:${two(m)}:${two(s)}`
 }
 
 /** [value, unit] for a duration */
@@ -88,7 +88,8 @@ function life(s: number): [string, string] {
   if (y >= 100) return ['>100', t('unit.years')]
   if (y >= 1) return [y.toFixed(1), t('unit.years')]
   const d = s / 86400
-  if (d >= 1) return [d.toFixed(0), t('unit.days')]
+  if (d >= 1.5) return [d.toFixed(0), t('unit.days')]
+  if (d >= 1) return ['1', t('unit.day')]
   return [(s / 3600).toFixed(1), t('unit.hours')]
 }
 
@@ -282,7 +283,7 @@ export function createSimPanel(
   )
 
   const mc = card('metrics', t('mc.title'))
-  mc.tools.append(el('div', { class: 'seg', role: 'group', 'aria-label': t('seg.aria') }, viewState, viewWear))
+  mc.tools.append(el('div', { class: 'seg', role: 'group', 'aria-label': t('seg.aria'), title: t('seg.title') }, viewState, viewWear))
   mc.body.append(
     el('h4', { class: 'sec' }, t('sec.serving')),
     grid(tl.tpot, tl.ttft, tl.tokens, tl.reqs),

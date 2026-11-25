@@ -15,8 +15,9 @@ import type { ThemeMode } from './types'
  *
  * Colour is semantic everywhere and is never reused for decoration:
  *   weights amber · valid KV blue · KV being written light blue ·
- *   invalid KV pink · free grey · SRAM aqua · compute violet ·
- *   UCIe and other links copper-orange · TSVs steel · controllers violet-grey
+ *   invalid KV pink · free grey · SRAM green · compute violet ·
+ *   UCIe and other links copper-orange · signal TSVs steel · power TSVs
+ *   copper · controllers violet-grey
  * The block-state colours were checked with a colour-vision validator in
  * both modes: every pair stays apart for deuteranopia, protanopia and
  * normal vision. Wear is a single-hue (orange) ramp, light to dark by day

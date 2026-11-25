@@ -5,7 +5,7 @@
 **Open it in a browser: <https://yisun219.github.io/hbf-city/>**
 (中文界面: <https://yisun219.github.io/hbf-city/?lang=zh>). Nothing to install.
 
-An explorable 3D model of an H200-class GPU and six HBF stacks on a silicon
+An explorable 3D model of a GH100-class GPU (the die in H100 and H200) and six HBF stacks on a silicon
 interposer. Each stack is a base (logic) die and sixteen NAND core dies joined
 by TSVs; open a stack to see its layers, slide a die out to see all 32 planes
 and 16,384 blocks, or lift the core dies to see the base die's UCIe PHYs,
@@ -15,13 +15,13 @@ channel controllers and SRAM.
 
 A serving simulator runs underneath: synthetic LLM sessions drawn from
 production trace statistics are batched on the GPU, their KV cache is written
-to HBF block by block, evicted, reclaimed and erased, and every one of the
+to HBF block by block and evicted, and its blocks are reclaimed and erased; every one of the
 1.57 million blocks on the package shows its live state or its wear. Hover
 over a die up close to read the block under the cursor: its plane and block
 number, what it holds, how many of its pages are still valid and how often it
 has been erased.
 
-**中文说明**：把一颗带 HBF 的 GPU 封装做成可探索的 3D 城市，直接用浏览器打开上面的网址即可，界面右上角可以切换中文 / English、浅色 / 深色。中间是 GPU，两侧各三个 HBF 堆叠；每个堆叠是一个 base die 加 16 层 NAND core die，用 TSV 连起来。可以把堆叠拆开看分层，把某一层 die 像抽屉一样拉出来看 32 个 plane、16,384 个 block，或把 core die 整体抬起来看 base die 上的 UCIe PHY、通道控制器和 SRAM。底下跑着一个 LLM serving 仿真：按生产 trace 的统计生成会话，做连续批处理，KV 按块写进 HBF、淘汰、回收、擦除；每个 block 实时显示状态或磨损，鼠标凑近 die 还能看到光标下那个 block 的编号、内容、有效页数和擦除次数。第一次来可以点「导览」，8 步走完整个结构和仿真。
+**中文说明**：把一个带 HBF 的 GPU 封装做成可探索的 3D 城市，直接用浏览器打开上面的网址即可，界面右上角可以切换中文 / English、浅色 / 深色。中间是 GPU，两侧各三个 HBF 堆叠；每个堆叠是一个 base die 加 16 层 NAND core die，用 TSV 连起来。可以把堆叠拆开看分层，把某一层 die 像抽屉一样拉出来看 32 个 plane、16,384 个 block，或把 core die 整体抬起来看 base die 上的 UCIe PHY、通道控制器和 SRAM。底下跑着一个大模型推理服务仿真：按生产 trace 的统计生成会话，做连续批处理，KV 按 block 写入 HBF，再经历淘汰、回收和擦除；每个 block 实时显示状态或磨损，镜头拉近后把鼠标停在 die 上，还能看到光标下那个 block 的编号、内容、有效页数和擦除次数。第一次来可以点“导览”，八站走完整个结构和仿真。
 
 | | |
 |---|---|
@@ -37,7 +37,7 @@ has been erased.
   operating system. **中文 / EN** switches the language.
 - Click anything for its notes: what it is, its numbers, and the source of
   each number. **A model · how much to trust it** lists what is simplified.
-- The scenario card on the left picks the model, workload, block policy,
+- The scenario card on the left picks the model, workload, allocation policy,
   interleave width and load; the Live panel on the right shows serving,
   traffic, capacity and endurance as the simulation runs.
 - Works best in a desktop browser with WebGL 2. Phones get a compact layout.
@@ -58,7 +58,7 @@ has been erased.
 | `Space` | Play or pause the simulation |
 | `W` | Block state / wear view |
 | `H` / `O` | Home view / top-down overview |
-| `N` / `L` / `B` / `V` | Light–dark / labels / GPU bulk silicon / true proportions |
+| `N` / `L` / `B` / `V` | Light–dark / labels / GPU bulk silicon / true scale |
 | `Esc` | Deselect |
 
 ## Run it locally
@@ -99,11 +99,11 @@ inspector prints the source next to each fact.
 | Host channels per stack | 16 × UCIe x64, 32 GT/s | OCP §4.5, Table 2 |
 | Link bandwidth | 3,072 GB/s per stack (75% AXI efficiency) | OCP Table 2 |
 | Footprint, height | ≈ 10.975 × 16 mm, 775 µm; UCIe bumps on a 10.975 mm edge | OCP §4.1, Fig. 37 |
-| Planes × blocks × pages × page | 32 × 512 × 512 × 4 KiB → 512 GiB/stack | HBFlex; page size OCP §4.1 |
+| Planes × blocks × pages × page | 32 × 512 × 512 × 4 KiB = 32 GiB per die → 512 GiB per stack | HBFlex; page size OCP §4.1 |
 | tR, tPROG | 4 µs, 75 µs | HBFlex §6.1 (after FlashAccel) |
 | Endurance | 100,000 P/E | HBFlex §3.3 |
 | Base-die SRAM | 40 MB per stack | HBFlex §4.1 |
-| Array-limited read | 512 planes × 4 KiB / 4 µs ≈ 524 GB/s | derived |
+| Array-limited read | 512 planes × 4 KiB / 4 µs ≈ 524 GB/s per stack | derived |
 
 Floor plans inside the stack are not public. The core die follows the
 published diagrams (FlashAccel Fig. 6c; "HBF Sucks" Fig. 2): signal TSVs in a
@@ -125,10 +125,10 @@ garbage-collection work, added together because they share the same planes.
 |---|---|---|
 | Models | DeepSeek-V3, Qwen3-235B-A22B, Hunyuan3; 8-bit weights and KV (one byte per element, as HBFlex assumes) rebuilt from their public configs (35,136 / 96,256 / 163,840 KV bytes per token) | Hugging Face configs |
 | Workload | Synthetic sessions from statistics computed from four 2-hour production traces: To-C chat, To-B API, Coding, Thinking | Qwen-Bailian traces (Wang et al., arXiv 2506.02634) |
-| Load | The default is the share of a trace one GPU sustains with HBFlex packing, with room to spare, from a small model of the iteration (batch by Little's law, length-biased contexts, the slowest domain, the prefill chunk on one die, GC). The tests run every model and workload at it for eight hours and require that no queue builds | this simulator |
+| Load | The default is the share of a trace one GPU sustains with HBFlex packing, with room to spare, from a small model of the iteration (batch by Little's law, length-biased contexts, the slowest domain, the prefill chunk on one or two domains, GC). The tests run every model and workload at it for eight hours and require that no queue builds | this simulator |
 | Writes | KV collects in base-die SRAM and is programmed a stripe at a time; one block number is used on all 32 planes of a die together, at one page number. A write the store cannot place yet stays in SRAM and is retried; no page is ever dropped | OCP §5.4, §5.7, §11.2.2 |
-| Eviction | Least-recently-used sessions are evicted when valid KV passes 90% of capacity, down to 85% | HBFlex §5.4 (90%); 85% is this simulator's |
-| Policies | **Arrival order, immediate reclaim**, a stand-in for the baseline HBFlex compares against (the paper does not define it), and **HBFlex lifetime packing, delayed reclaim**: blocks labelled by root-request start time (the 10-minute window is this simulator's choice), reclaimed when a domain is 95% written, fully stale blocks first and then the least-valid ones at least a quarter stale, with two blocks per domain kept for GC copies; a request whose interval has no open block shares the one with the closest label | HBFlex §5.4 |
+| Eviction | Least-recently-used sessions are evicted when valid KV passes 90% of capacity, down to 85% | HBFlex §5.4 (90%); 85% is this simulator's choice |
+| Policies | **Arrival order, immediate reclaim**, a stand-in for the baseline that HBFlex compares against (the paper does not define it), and **HBFlex lifetime packing, delayed reclaim**: blocks labelled by root-request start time (the 10-minute window is this simulator's choice), reclaimed when a domain is 95% written, fully stale blocks first and then the least-valid ones at least a quarter stale, with two blocks per domain kept for GC copies; a request whose interval has no open block opens a free one, or shares the one with the closest label once the domain has eight open blocks or is down to its GC reserve | HBFlex §5.4 |
 
 Nothing here does wear leveling: free blocks are taken in queue order.
 OCP §11.4 recommends enabling base-die or host-controlled wear leveling; the
@@ -153,14 +153,14 @@ Simplifications that matter:
 - Eviction runs in 5% batches (90% down to 85%), so GC comes in bursts; the
   Live panel averages GC copies and erases over about five simulated minutes.
 - Write amplification depends strongly on the interleave width: wider domains
-  make coarser superblocks. "Near 4" for arrival order holds at one die per
+  make coarser erase units (one block row on every die of the domain). "Near 4" for arrival order holds at one die per
   session; at 16 dies it is far higher.
-- Base-die SRAM is not enforced. At 16 dies per session a request's open
+- Base-die SRAM capacity is not enforced. At 16 dies per session a request's open
   stripe is 2 MiB, and staged KV can exceed the package's 240 MB; the Live
   panel shows that in red rather than stalling.
-- The "first wear-out" projection uses how fast the most-erased block's count
-  has grown since the KV cache was written over twice, which leaves the first
-  fill out, and appears two simulated hours after that.
+- The "first wear-out" projection uses how fast the mean erase count of the
+  16 most-erased blocks has grown since the KV cache was written over twice,
+  which leaves the first fill out, and appears two simulated hours after that.
 - Estimates: 1.5 ms block erase, 0.5 ms launch overhead per iteration, 50%
   of dense FP8 peak, a 4,000-request queue limit.
 - While the batch has room, a step never runs past the next arrival, so time
@@ -173,8 +173,10 @@ Simplifications that matter:
 
 Colour always means something. Blocks: weights amber, valid KV blue, KV still
 being written light blue, invalid KV pink, free grey. Structure: compute
-violet, SRAM aqua, UCIe and other links copper-orange, TSVs steel. Wear is a
-single orange ramp (light to dark in light mode, dark to bright in dark mode).
+violet, SRAM green, UCIe and other links copper-orange, signal TSVs steel,
+power TSVs copper. An erase flashes the erased block row red for a moment.
+Wear is a single orange ramp (light to dark in light mode, dark to bright in
+dark mode), with weight blocks, which are never erased here, in grey.
 The block colours were checked with a colour-vision validator in both modes:
 every pair stays distinguishable for deuteranopia, protanopia and normal
 vision.
@@ -182,7 +184,7 @@ vision.
 ## How much to trust this
 
 - It is a model, not a die photo. Unpublished layouts are marked in the inspector.
-- Heights are exaggerated 12× by default (`V` shows true proportions); circuit
+- Heights are exaggerated 12× by default (`V` shows true scale); circuit
   blocks are raised for legibility; opening a stack and sliding a die out are
   viewing aids.
 - The GPU's circuits sit at the bottom, facing the interposer, as on a real

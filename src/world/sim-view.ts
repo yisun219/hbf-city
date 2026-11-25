@@ -45,7 +45,7 @@ const WEAR_RAMP: Record<ThemeMode, [number, number, number][]> = {
   night: [0x3b2418, 0x7a3a18, 0xc05a22, 0xf08a3c, 0xffc38a].map((h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255]),
 }
 /** Weight blocks in the wear view: neutral, outside the ramp. */
-const WEAR_WEIGHTS: Record<ThemeMode, number> = { day: 0x8a919b, night: 0x121821 }
+const WEAR_WEIGHTS: Record<ThemeMode, number> = { day: 0x8a919b, night: 0x565e6b }
 
 let RAMP = WEAR_RAMP.night
 
