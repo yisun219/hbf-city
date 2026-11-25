@@ -152,7 +152,7 @@ export const STRINGS: Record<string, [string, string]> = {
   'rate.paused': ['paused', '已暂停'],
 
   /* ---- scenario ---- */
-  'sc.title': ['Serving scenario', '推理服务场景'],
+  'sc.title': ['Scenario', '推理场景'],
   'sc.skip': ['+6 h', '+6 小时'],
   'sc.skip.title': ['Simulate six hours at once', '一次仿真 6 小时'],
   'sc.restart': ['Restart', '重新开始'],
@@ -223,7 +223,7 @@ export const STRINGS: Record<string, [string, string]> = {
   'tile.wear': ['Erases/block', '每块擦除'],
   'tile.wear.title': ['Most-erased KV block, and the mean', '擦除最多的 KV block，以及平均值'],
   'tile.life': ['First wear-out', '首块失效'],
-  'tile.life.title': ['When the most-erased block would reach its P/E limit, at the rate the maximum erase count grew over the last 2 simulated hours', '按最近 2 小时仿真时间里最大擦除次数的增长速度，推算擦除最多的 block 到达 P/E 上限的时间'],
+  'tile.life.title': ['When the most-erased block would reach its P/E limit, at the rate the highest erase count has grown since the KV cache was written over twice; shown 2 simulated hours after that', '按 KV 缓存被写满两遍之后最大擦除次数的增长速度，推算擦除最多的 block 到达 P/E 上限的时间；从那之后 2 小时仿真时间才开始显示'],
   'sub.batch': ['batch {n}', 'batch {n}'],
   'sub.queue': ['queue {n}', '排队 {n}'],
   'sub.noQueue': ['no queue', '无排队'],
@@ -237,7 +237,7 @@ export const STRINGS: Record<string, [string, string]> = {
   'sub.mean': ['mean {x}', '平均 {x}'],
   'sub.life': ['at {k}k P/E', '按 {k}k P/E 算'],
   'sub.lifeNone': ['no erases yet', '还没有擦除'],
-  'sub.lifeWait': ['needs 1 h of history', '需要 1 小时的数据'],
+  'sub.lifeWait': ['after the cache settles', '等缓存进入稳态'],
   'sub.lifeIdle': ['no recent erases', '最近没有擦除'],
   'unit.max': ['max', '最多'],
   'unit.years': ['years', '年'],

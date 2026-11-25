@@ -128,7 +128,7 @@ garbage-collection work, added together because they share the same planes.
 | Load | The default is the share of a trace one GPU sustains with HBFlex packing, with room to spare, from a small model of the iteration (batch by Little's law, length-biased contexts, the slowest domain, the prefill chunk on one die, GC). The tests run every model and workload at it for eight hours and require that no queue builds | this simulator |
 | Writes | KV collects in base-die SRAM and is programmed a stripe at a time; one block number is used on all 32 planes of a die together, at one page number. A write the store cannot place yet stays in SRAM and is retried; no page is ever dropped | OCP §5.4, §5.7, §11.2.2 |
 | Eviction | Least-recently-used sessions are evicted when valid KV passes 90% of capacity, down to 85% | HBFlex §5.4 (90%); 85% is this simulator's |
-| Policies | **Arrival order, immediate reclaim**, a stand-in for the baseline HBFlex compares against (the paper does not define it), and **HBFlex lifetime packing, delayed reclaim**: blocks labelled by root-request start time (the 10-minute window is this simulator's choice), reclaimed when a domain is 95% written, fully stale blocks first and then the least-valid ones, with two blocks per domain kept for GC copies | HBFlex §5.4 |
+| Policies | **Arrival order, immediate reclaim**, a stand-in for the baseline HBFlex compares against (the paper does not define it), and **HBFlex lifetime packing, delayed reclaim**: blocks labelled by root-request start time (the 10-minute window is this simulator's choice), reclaimed when a domain is 95% written, fully stale blocks first and then the least-valid ones at least a quarter stale, with two blocks per domain kept for GC copies; a request whose interval has no open block shares the one with the closest label | HBFlex §5.4 |
 
 Nothing here does wear leveling: free blocks are taken in queue order.
 OCP §11.4 recommends enabling base-die or host-controlled wear leveling; the
@@ -159,7 +159,8 @@ Simplifications that matter:
   stripe is 2 MiB, and staged KV can exceed the package's 240 MB; the Live
   panel shows that in red rather than stalling.
 - The "first wear-out" projection uses how fast the most-erased block's count
-  grew over the last two simulated hours, and waits for an hour of history.
+  has grown since the KV cache was written over twice, which leaves the first
+  fill out, and appears two simulated hours after that.
 - Estimates: 1.5 ms block erase, 0.5 ms launch overhead per iteration, 50%
   of dense FP8 peak, a 4,000-request queue limit.
 - While the batch has room, a step never runs past the next arrival, so time

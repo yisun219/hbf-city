@@ -30,13 +30,17 @@ import { HBF } from '../core/hbf-spec'
  *            root-request start time; the 10-minute window is this store's
  *            choice) and delayed reclamation: eviction only marks pages
  *            invalid, and a domain reclaims once 95 % of its KV superblocks are
- *            written (HBFlex §5.4: "GC at 95%"). Reclaiming until 10 % are free,
- *            entirely invalid superblocks first and then the least-valid ones,
- *            is this store's choice.
+ *            written (HBFlex §5.4: "GC at 95%"). With no block for its
+ *            interval, a request opens a free one or shares the open block
+ *            with the closest label (§5.4). Reclaiming until 10 % are free,
+ *            entirely invalid superblocks first and then the least-valid ones
+ *            that are at least a quarter stale, is this store's choice.
  *
  * No page is ever dropped. GC copies need somewhere to go, so hbflex keeps
  * GC_RESERVE free superblocks per domain that host writes may not take; a
- * write that finds no room is refused and stays in base-die SRAM until it fits.
+ * write that finds no room in its domain spills to the domain with the most
+ * free blocks, and if none has room it is refused and stays in base-die SRAM
+ * until eviction frees space.
  *
  * Free superblocks are taken in queue order and nothing here looks at erase
  * counts: this store shows what wear looks like without wear leveling, which
@@ -75,13 +79,15 @@ export const RECLAIM_STOP_FREE = 0.1
 /** Lifetime-label window for HBFlex packing, seconds. */
 export const LABEL_WINDOW = 600
 /**
- * Open superblocks per domain before the oldest label is closed. Sessions
- * last up to an hour, so about six 10-minute labels are live at once; fewer
- * slots close blocks nearly empty and then erase them for almost no data.
+ * Open superblocks per domain for host labels under hbflex. Sessions last up
+ * to an hour, so about six 10-minute labels are live at once; a label beyond
+ * the limit shares the open block with the closest label (HBFlex §5.4).
  */
 export const MAX_OPEN = 8
 /** Free superblocks per domain kept for GC copies under hbflex; host writes may not take them. */
 export const GC_RESERVE = 2
+/** A GC victim must be at least this stale: copying out a nearly full block frees almost nothing. */
+export const VICTIM_MAX_VALID = Math.floor(PAGES_PER_SB * 0.75)
 const GC_LABEL = -1
 
 /** Dies of a domain: stack-major, strided so a domain's dies interleave in the stack. */
@@ -326,8 +332,26 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
     const m = open[d]
     const cur = m.get(lab)
     if (cur !== undefined) return cur
-    if (!gc && policy === 'hbflex' && freeLen[d] <= GC_RESERVE) return -1
-    if (m.size >= MAX_OPEN) {
+    if (policy === 'hbflex' && !gc) {
+      // HBFlex §5.4: with no block for this interval, open a free block for it
+      // "or use a block with the closest label". Host labels may hold at most
+      // MAX_OPEN blocks, and the GC reserve is not theirs to take; past either
+      // limit, share the closest label's open block instead of closing a block
+      // half written (a half-written closed block is GC's cheapest victim, and
+      // recycling it over and over wears a few blocks out fast).
+      const hostOpen = m.size - (m.has(GC_LABEL) ? 1 : 0)
+      if (hostOpen >= MAX_OPEN || freeLen[d] <= GC_RESERVE) {
+        let best = -1
+        let gap = Infinity
+        for (const [k, sb] of m) {
+          if (k !== GC_LABEL && Math.abs(k - lab) < gap) {
+            gap = Math.abs(k - lab)
+            best = sb
+          }
+        }
+        if (best >= 0 || freeLen[d] <= GC_RESERVE) return best
+      }
+    } else if (m.size >= MAX_OPEN) {
       let oldest = Infinity
       for (const k of m.keys()) if (k !== GC_LABEL && k < oldest) oldest = k
       if (oldest !== Infinity) closeSb(m.get(oldest)!, now)
@@ -455,7 +479,7 @@ export function createStore(policy: PolicyId, weightBytes: number, width: Interl
               best = valid[sb]
             }
           }
-          if (pick < 0 || valid[pick] > gcRoom(d)) break
+          if (pick < 0 || valid[pick] > VICTIM_MAX_VALID || valid[pick] > gcRoom(d)) break
           collect(pick, now)
           // bound the work of one call; the next pass carries on
           if (++copies >= 64) break

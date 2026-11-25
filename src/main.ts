@@ -33,7 +33,7 @@ import type { Tour } from './ui/tour'
 import { createActivity } from './world/activity'
 import { createGpu } from './world/gpu'
 import { createStacks } from './world/hbf-stack'
-import { DEFAULT_VERTICAL_SCALE, FEATURED_STACK, LIFT_BASE, STACK_SITES, VIEW } from './world/layout'
+import { DEFAULT_VERTICAL_SCALE, FEATURED_STACK, LIFT_BASE, STACK, STACK_SITES, VIEW } from './world/layout'
 import { createOccupancyAtlas } from './world/occupancy'
 import { createPackage } from './world/package'
 import { createSimView } from './world/sim-view'
@@ -283,6 +283,17 @@ async function boot(): Promise<void> {
       // from above and beyond the drawer, so the stack stays at the edge of frame
       dir = [-site.inward * 0.55, 1.1, 0.62]
       distance = clamp(r * 1.15 + 20, 60, 600)
+    } else if (site && def.district === 'package') {
+      // a stack's UCIe link: side-on from outside the package, so the GPU's
+      // PHY edge sits on one side of the lanes and the opened stack, with its
+      // TSVs, on the other; the generic stack direction would put the camera
+      // inside the opened stack
+      const out = site.z === 0 ? 1 : Math.sign(site.z)
+      // centre a little inside the stack: the GPU is wider than a stack and would fill the frame
+      center.x = site.phyEdgeX - site.inward * STACK.length * 0.35
+      center.y = 50
+      dir = [0, 0.5, out]
+      distance = clamp(r * 4 + 140, 300, 700)
     } else if (site && def.district === 'stack' && def.id !== `stack.${def.stack}`) {
       // base-die parts: look down into the opened gap from outside the stack
       center.y = box.max.y
@@ -567,13 +578,14 @@ async function boot(): Promise<void> {
 
   onLang(() => {
     document.title = t('doc.title')
-    const wasTour = tour.active
+    const at = tour.index
     tour.stop()
     inspector.dispose()
     hud.dispose()
     buildUi()
     labels.relabel()
-    if (wasTour) bus.emit('toast', { text: t('tb.tour'), ms: 1200 })
+    // an open tour carries on at the same stop, in the new language
+    if (at >= 0) tour.show(at)
   })
 
   onThemeMode(() => {

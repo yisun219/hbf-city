@@ -262,11 +262,11 @@ describe('serving simulator', () => {
     expect(c.reclaimable).toBeGreaterThanOrEqual(0)
   })
 
-  it('projects first wear-out only once it has an hour of history, from the hottest block', () => {
+  it('projects first wear-out only after the cache settles, from the hottest block', () => {
     const sim = createSim({ model: 'qwen3-235b', workload: 'toC', policy: 'arrival', load: 1, seed: 9 })
     sim.run(1800)
     expect(sim.wear().lifeSeconds).toBeNaN()
-    sim.run(3 * 3600)
+    sim.run(6 * 3600)
     const w = sim.wear()
     expect(w.max).toBeGreaterThan(0)
     expect(Number.isFinite(w.lifeSeconds)).toBe(true)

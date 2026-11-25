@@ -159,11 +159,14 @@ const MAX_QUEUE = 4000
 const MAX_STEP_S = 2
 /** Smoothing of the bursty rates (GC copies, erases): a sustained rate, not the last burst. */
 const TAU_SLOW = 300
-/** Wear projection: the hottest block's erase rate over this window of simulated time ... */
-const WEAR_WINDOW_S = 2 * 3600
-/** ... sampled this often, once at least WEAR_MIN_S of history exists. */
+/**
+ * Wear projection: the hottest block's average erase rate since the KV cache
+ * had been written over WEAR_SETTLE_TURNOVERS times (which leaves out the first
+ * fill), shown once WEAR_MIN_S of that has passed. Checked every WEAR_SAMPLE_S.
+ */
+const WEAR_SETTLE_TURNOVERS = 2
+const WEAR_MIN_S = 2 * 3600
 const WEAR_SAMPLE_S = 300
-const WEAR_MIN_S = 3600
 
 interface Session {
   id: number
@@ -232,7 +235,7 @@ export interface SimMetrics {
 export interface WearStats {
   mean: number
   max: number
-  /** erases per second of the most-erased block over the last WEAR_WINDOW_S; NaN without enough history */
+  /** erases per second of the most-erased block since the cache settled; NaN until WEAR_MIN_S after that */
   rate: number
   /** projected seconds until the most-erased block reaches the P/E limit; NaN without enough history */
   lifeSeconds: number
@@ -295,8 +298,10 @@ export function createSim(opts: Partial<SimOptions> = {}): Sim {
   let refusedSeen = 0
   /** finished requests whose last KV is still in SRAM because the store had no room */
   let stalled: Request[] = []
-  /** (time, max erase count) samples for the wear projection */
-  const wearHist: { t: number; max: number }[] = []
+  /** when the wear projection starts, and the hottest block's erase count then */
+  let wearStart = NaN
+  let wearStartMax = 0
+  let wearChecked = -Infinity
 
   const heap: Arrival[] = []
   const waiting: Request[] = []
@@ -635,10 +640,12 @@ export function createSim(opts: Partial<SimOptions> = {}): Sim {
   }
 
   function sampleWear(): void {
-    const last = wearHist.length ? wearHist[wearHist.length - 1].t : -Infinity
-    if (now - last < WEAR_SAMPLE_S) return
-    wearHist.push({ t: now, max: store.stats.maxErase })
-    while (wearHist.length > 2 && now - wearHist[1].t >= WEAR_WINDOW_S) wearHist.shift()
+    if (!Number.isNaN(wearStart) || now - wearChecked < WEAR_SAMPLE_S) return
+    wearChecked = now
+    if ((store.stats.hostPages + store.stats.gcPages) / store.kvPages >= WEAR_SETTLE_TURNOVERS) {
+      wearStart = now
+      wearStartMax = store.stats.maxErase
+    }
   }
 
   function refreshGauges(): void {
@@ -698,11 +705,9 @@ export function createSim(opts: Partial<SimOptions> = {}): Sim {
       const mean = store.stats.erases / Math.max(1, store.kvSuperblocks)
       const max = store.stats.maxErase
       // The first block to wear out is the most-erased one: project from how
-      // fast the maximum has grown over the last two simulated hours, which
-      // leaves the start-up fill out of it.
-      const first = wearHist.length ? wearHist[0] : undefined
-      if (!first || now - first.t < WEAR_MIN_S) return { mean, max, rate: NaN, lifeSeconds: NaN }
-      const rate = (max - first.max) / (now - first.t)
+      // fast the maximum has grown since the cache settled into its turnover.
+      if (Number.isNaN(wearStart) || now - wearStart < WEAR_MIN_S) return { mean, max, rate: NaN, lifeSeconds: NaN }
+      const rate = (max - wearStartMax) / (now - wearStart)
       const lifeSeconds = rate > 0 ? Math.max(0, HBF.peCycles - max) / rate : Infinity
       return { mean, max, rate, lifeSeconds }
     },

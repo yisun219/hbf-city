@@ -99,6 +99,8 @@ const STOPS: Stop[] = [
       zh: 'KV 一块一块地堆起来：蓝色是有效 KV，粉色是失效 KV，浅蓝是还在写的 block，琥珀色存的是权重。有效 KV 占到容量的 90% 时，最久没用的会话被淘汰，它们的 block 要先擦除才能再写。',
     },
     enter(api) {
+      // close any notes so the Live panel shows capacity filling
+      api.select(null)
       api.setBlockView('state')
       api.ensureTime(4 * 3600)
       api.setSpeed(3600)
@@ -137,6 +139,10 @@ export interface Tour {
   start(): void
   stop(): void
   readonly active: boolean
+  /** the open stop, or -1 */
+  readonly index: number
+  /** show stop `k` without re-entering it: the scene is already set up (a language switch) */
+  show(k: number): void
   /** handle a key while the tour is open; returns true if used */
   key(k: string): boolean
 }
@@ -186,6 +192,15 @@ export function createTour(root: HTMLElement, api: TourApi): Tour {
     stop,
     get active() {
       return i >= 0
+    },
+    get index() {
+      return i
+    },
+    show(k) {
+      if (k < 0 || k >= STOPS.length) return
+      i = k
+      render()
+      box.hidden = false
     },
     key(k) {
       if (i < 0) return false
