@@ -21,5 +21,7 @@ export default defineConfig({
   test: {
     exclude: ['**/node_modules/**', '**/dist/**', '.claude/**'],
     environment: 'node',
+    // several tests simulate hours of serving; shared CI runners are slower than a laptop
+    testTimeout: 60_000,
   },
 })
