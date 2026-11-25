@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-theme="night">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <title>HBFCity — a GPU package with High Bandwidth Flash</title>
+    <meta name="description" content="An explorable 3D city of a GPU package with High Bandwidth Flash stacks, for LLM serving." />
+    <script>
+      try {
+        var t = localStorage.getItem('hbfcity.theme')
+        var q = new URLSearchParams(location.search).get('theme')
+        document.documentElement.dataset.theme = q === 'day' || q === 'night' ? q : t === 'day' ? 'day' : 'night'
+      } catch (e) {}
+    </script>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='22' width='20' height='4' rx='1' fill='%233fc8ff'/%3E%3Crect x='6' y='16' width='20' height='4' rx='1' fill='%237fd8ff'/%3E%3Crect x='6' y='10' width='20' height='4' rx='1' fill='%23a9dcff'/%3E%3Crect x='6' y='4' width='20' height='4' rx='1' fill='%23ffb03a'/%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <div id="canvas-root"></div>
+    <div id="labels-root"></div>
+    <div id="hud"></div>
+    <div id="boot" role="status">
+      <div class="boot__title">HBFCity</div>
+      <div class="boot__bar"><i id="boot-fill"></i></div>
+      <div id="boot-status" class="boot__status">Loading</div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
