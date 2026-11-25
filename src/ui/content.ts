@@ -372,7 +372,7 @@ function build(l: Lang): Record<string, ComponentDoc> {
 
     gpu: {
       title: L('GPU die', 'GPU 芯片'),
-      subtitle: L('GH100-class, drawn active side up', 'GH100 级，主动面朝上画'),
+      subtitle: L('GH100-class, seen through its silicon', 'GH100 级，透过体硅看电路'),
       tldr: L(
         `${GPU.gpcs} GPCs of ${GPU.tpcsPerGpc * GPU.smsPerTpc} SMs (${GPU.enabledSms} of ${smTotal} enabled on H100 SXM5), ${GPU.l2MB} MB of L2 enabled (${GPU.l2FullMB} MB on the full die), and memory PHYs on both long edges, here facing six HBF stacks.`,
         `${GPU.gpcs} 个 GPC，每个 ${GPU.tpcsPerGpc * GPU.smsPerTpc} 个 SM（H100 SXM5 启用 ${smTotal} 个中的 ${GPU.enabledSms} 个），启用 ${GPU.l2MB} MB L2（整颗 die 有 ${GPU.l2FullMB} MB），两条长边上是存储 PHY，这里正对六个 HBF 堆叠。`,
@@ -389,10 +389,10 @@ function build(l: Lang): Record<string, ComponentDoc> {
       ],
       sections: [
         {
-          heading: L('Active side up', '主动面朝上'),
+          heading: L('Seen through the silicon', '透过体硅看电路'),
           body: L(
-            'On the package the GPU is flip-chip mounted: its transistors face down onto the interposer and its top is bare silicon. The city keeps the circuits at the bottom, where they are, and draws the silicon above them as a ghost volume as tall as the stacks.',
-            '在封装上 GPU 是倒装的：晶体管朝下贴着中介层，顶面是裸硅。这里把电路留在底部它本来的位置，把上面的硅画成半透明的体积，高度和堆叠一样。',
+            'On the package the GPU is flip-chip mounted: its transistors face down onto the interposer and its top is bare silicon. The city keeps the circuits at the bottom, where they are, and draws the silicon above them as a ghost volume as tall as the stacks. The circuit blocks are drawn facing up so they can be seen from above; on the real die the transistors and wiring face the bumps below.',
+            '在封装上 GPU 是倒装的：晶体管朝下贴着中介层，顶面是裸硅。这里把电路留在底部它本来的位置，把上面的硅画成半透明的体积，高度和堆叠一样。电路模块画成朝上，方便从上方看清；真实芯片上晶体管和布线朝下，对着下面的凸点。',
           ),
         },
         {
@@ -583,7 +583,7 @@ export function trustNotes(): string[] {
         '这里没有做磨损均衡。OCP §11.4 建议开启 base die 或主机控制的磨损均衡；仿真特意不做，让磨损视图显示没有它时的样子。',
         '没有仿真数据刷新（OCP §11.5：通常每 24–48 小时一次，读到产品规定的次数后也要刷新），所以这里权重 block 不会磨损。',
         '仿真不限制 base die SRAM 容量。每会话交织 16 层 die 时，暂存的 KV 可能超过整颗封装的 240 MB；实时面板会把它标红，但仿真不会因此停顿。',
-        'GPU 主动面朝上画；真实封装上它朝下贴着中介层。',
+        'GPU 的电路和真实的倒装封装一样位于底部、朝向中介层；上面的体硅画成半透明，好让电路露出来，电路模块也画成朝上。',
       ]
     : [
         'This is a model, not a die photo. HBF floor plans inside the stack are not public; they follow published diagrams.',
@@ -595,6 +595,6 @@ export function trustNotes(): string[] {
         'Nothing here levels wear. OCP §11.4 recommends enabling base-die or host-controlled wear leveling; the simulator leaves it out so the wear view shows wear without it.',
         'Data refresh is not simulated (OCP §11.5: typically every 24–48 hours, and after a product-specific number of reads), so weight blocks never wear here.',
         'Base-die SRAM is not enforced. At 16 dies per session, staged KV can exceed the package’s 240 MB; the Live panel shows it in red, and the simulator does not stall for it.',
-        'The GPU is drawn active side up; on a real package it faces down onto the interposer.',
+        'The GPU’s circuits sit at the bottom, facing the interposer, as on a real flip-chip package; the bulk silicon above them is drawn translucent so they show, and the circuit blocks are drawn facing up.',
       ]
 }

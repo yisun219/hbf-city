@@ -111,8 +111,8 @@ const STOPS: Stop[] = [
   {
     title: { en: 'Wear', zh: '磨损' },
     body: {
-      en: 'Flash wears out as it is erased. Nothing here levels wear, and in this simulation the most-erased blocks run far ahead of the average. The Live panel projects when the first would reach 100,000 cycles at the current rates; a real base die would then retire it to a spare block (OCP §4.1, §11.5). The stronger the orange, the more erases; weight blocks, never erased here, show grey.',
-      zh: '闪存每擦一次就磨损一点。这里没有做磨损均衡，仿真里擦得最多的 block 远远跑在平均值前面。实时面板按当前速率推算第一个 block 什么时候到 10 万次；到那时，真实的 base die 会用备用 block 顶替它（OCP §4.1、§11.5）。橙色越浓擦得越多；权重 block 在这里从不擦除，显示为灰色。',
+      en: 'Flash wears out as it is erased. Nothing here levels wear, so some blocks are erased more often than the average. The Live panel projects when the first would reach 100,000 cycles at the current rates; a real base die would then retire it to a spare block (OCP §4.1, §11.5). The stronger the orange, the more erases; weight blocks, never erased here, show grey.',
+      zh: '闪存每擦一次就磨损一点。这里没有做磨损均衡，有些 block 被擦得比平均更频繁。实时面板按当前速率推算第一个 block 什么时候到 10 万次；到那时，真实的 base die 会用备用 block 顶替它（OCP §4.1、§11.5）。橙色越浓擦得越多；权重 block 在这里从不擦除，显示为灰色。',
     },
     enter(api) {
       api.ensureTime(24 * 3600)

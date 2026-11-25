@@ -257,6 +257,12 @@ export const BASE_PLAN = {
   ctrlU: [0.105, 0.43] as const,
   /** NAND-side PHY / TSV landing strip along the centre, ending before the debug blocks */
   tsvU: [0.105, 0.905] as const,
+  /**
+   * where the signal-TSV columns stand: on the landing strip and inside the
+   * core dies' TSV strip, clear of the UCIe PHYs at the near edge and the
+   * debug blocks at the far one
+   */
+  sigTsvU: [0.12, 0.9] as const,
   /** SRAM banks */
   sramU: [0.46, 0.9] as const,
   /** shared test and debug blocks at the far edge */

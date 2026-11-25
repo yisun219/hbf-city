@@ -611,8 +611,13 @@ async function boot(): Promise<void> {
       home,
       overview,
       focus: (id) => {
-        select(id)
-        flyToId(id)
+        // on narrow screens the notes are a bottom sheet that would cover the
+        // tour card: frame the part and leave its notes a tap away
+        if (window.innerWidth <= 900) peek(id)
+        else {
+          select(id)
+          flyToId(id)
+        }
       },
       peek,
       select,

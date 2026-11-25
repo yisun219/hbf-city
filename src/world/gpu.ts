@@ -7,7 +7,7 @@ import { makeRng } from '../core/util'
 import { BASE_PLAN, GPU_DIE, GPU_PLAN, MM, STACK, STACK_SITES, gpuHeight, stackV } from './layout'
 
 /* ============================================================================
- * THE GPU — downtown. A GH100-class die drawn ACTIVE SIDE UP.
+ * THE GPU — downtown. A GH100-class die, seen through its silicon.
  *
  * On a real package the GPU is flip-chip mounted: its transistors face down
  * onto the interposer and the top of the die is bare silicon. The city keeps
@@ -48,6 +48,23 @@ function put(mesh: THREE.InstancedMesh, i: number, x: number, y0: number, z: num
   mesh.setMatrixAt(i, _m)
 }
 
+/**
+ * The SMs drawn dark. H100 SXM5 enables 66 of GH100's 72 TPCs, so SMs go dark
+ * in TPC pairs; which TPCs are fused off varies chip to chip, and this pattern
+ * is an example. SMs are numbered along each GPC's rows, so SMs 2k and 2k+1
+ * form TPC k.
+ */
+export function fusedOffSms(seed = 0x9100): Set<number> {
+  const totalSms = GPU.gpcs * GPU.tpcsPerGpc * GPU.smsPerTpc
+  const rng = makeRng(seed)
+  const tpcsOff = (totalSms - GPU.enabledSms) / GPU.smsPerTpc
+  const offTpcs = new Set<number>()
+  while (offTpcs.size < tpcsOff) offTpcs.add(Math.floor(rng() * (totalSms / GPU.smsPerTpc)))
+  const out = new Set<number>()
+  for (const k of offTpcs) for (let m = 0; m < GPU.smsPerTpc; m++) out.add(k * GPU.smsPerTpc + m)
+  return out
+}
+
 export function createGpu(ctx: WorldContext): GpuModule {
   const group = new THREE.Group()
   group.name = 'gpu'
@@ -72,15 +89,7 @@ export function createGpu(ctx: WorldContext): GpuModule {
   const smRows = 3
   const totalSms = GPU.gpcs * GPU.tpcsPerGpc * GPU.smsPerTpc
 
-  // H100 SXM5 enables 66 of GH100's 72 TPCs, so SMs go dark in TPC pairs.
-  // Which TPCs are fused off varies chip to chip; this pattern is an example.
-  // SMs are numbered along each GPC's rows, so SMs 2k and 2k+1 form TPC k.
-  const rng = makeRng(0x9100)
-  const disabled = new Set<number>()
-  const tpcsOff = (totalSms - GPU.enabledSms) / GPU.smsPerTpc
-  const offTpcs = new Set<number>()
-  while (offTpcs.size < tpcsOff) offTpcs.add(Math.floor(rng() * (totalSms / GPU.smsPerTpc)))
-  for (const k of offTpcs) for (let m = 0; m < GPU.smsPerTpc; m++) disabled.add(k * GPU.smsPerTpc + m)
+  const disabled = fusedOffSms()
 
   const smBody = new THREE.InstancedMesh(unit, surface({ color: 'computeDim', roughness: 0.55, metalness: 0.25, nightRoughness: 0.6 }), totalSms)
   const roofMat = signal({ color: 'compute', glow: 0.42, nightBase: 0.3 })

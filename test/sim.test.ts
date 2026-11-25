@@ -276,6 +276,20 @@ describe('serving simulator', () => {
   })
 })
 
+describe('wear-out projection', () => {
+  it('does not depend on how the run is stepped', () => {
+    const run = (chunk: number) => {
+      const s = createSim({ model: 'deepseek-v3', workload: 'toC', load: suggestedLoad('deepseek-v3', 'toC'), seed: 7 })
+      while (s.now < 24 * 3600 - 1) s.run(Math.min(chunk, 24 * 3600 - s.now))
+      return s.wear().lifeSeconds
+    }
+    const a = run(3600)
+    const b = run(36000)
+    expect(Number.isFinite(a)).toBe(true)
+    expect(Math.abs(a - b) / Math.min(a, b)).toBeLessThan(0.15)
+  }, 120_000)
+})
+
 describe('suggested load', () => {
   // The load the scenario card calls "what one GPU sustains" must be sustained
   // for every model and workload, through the cache filling and turning over.

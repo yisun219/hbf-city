@@ -298,7 +298,7 @@ export const STRINGS: Record<string, [string, string]> = {
   'comp.tsvPower.name': ['Power TSVs', '电源 TSV'],
   'comp.tsvPower.role': ['stack {s} · supply columns along both long edges (sampled)', '堆叠 {s} · 沿两条长边的供电柱（抽样画）'],
   'comp.gpu.name': ['GPU die', 'GPU 芯片'],
-  'comp.gpu.role': ['GH100-class · drawn active side up', 'GH100 级 · 主动面朝上画'],
+  'comp.gpu.role': ['GH100-class · circuits seen through the silicon', 'GH100 级 · 透过体硅看电路'],
   'comp.bulk.name': ['Bulk silicon', '体硅'],
   'comp.bulk.role': ['the back of a flip-chip die', '倒装芯片的背面'],
   'comp.gpc.name': ['GPC {g}', 'GPC {g}'],

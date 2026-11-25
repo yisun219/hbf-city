@@ -74,12 +74,7 @@ const _hitP = new THREE.Vector3()
 
 /** Signal-TSV columns drawn per stack: two rows along the centre strip. */
 const SIG_COLS = 24
-/**
- * Where along the stack (u, from the GPU-facing edge) the signal columns
- * stand: inside the core dies' TSV strip and the base die's landing strip,
- * clear of the UCIe PHYs at the near edge and the debug blocks at the far one.
- */
-const SIG_U = [0.12, 0.9] as const
+const SIG_U = BASE_PLAN.sigTsvU
 /** Power-TSV columns per stack: one row along each long edge. */
 const PWR_COLS = 12
 

@@ -185,8 +185,9 @@ vision.
 - Heights are exaggerated 12× by default (`V` shows true proportions); circuit
   blocks are raised for legibility; opening a stack and sliding a die out are
   viewing aids.
-- The GPU is drawn active side up; on a real package it is flip-chip mounted
-  face down. Its bulk silicon is a translucent volume as tall as the stacks.
+- The GPU's circuits sit at the bottom, facing the interposer, as on a real
+  flip-chip package. Its bulk silicon above them is a translucent volume as tall
+  as the stacks, and the circuit blocks are drawn facing up so they show.
 - OCP Table 3 counts 16 banks per channel; this model uses HBFlex's 32 planes
   per die. One host channel per die follows OCP §4.3; OCP Fig. 4 shows another
   arrangement.

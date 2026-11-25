@@ -37,6 +37,7 @@
   color-scheme: dark;
 }
 
+/* light-mode text colours hold at least 4.5:1 on panels and tiles (WCAG AA) */
 [data-theme='day'] {
   --bg-void: #c9d3de;
   --panel: rgba(250, 251, 253, 0.94);
@@ -46,11 +47,11 @@
   --line-strong: rgba(30, 50, 80, 0.3);
   --ink: #18222e;
   --ink-dim: #3f4c5c;
-  --ink-faint: #627083;
+  --ink-faint: #5a6779;
   --accent: #2f5d8a;
-  --on: #2a78d6;
-  --on-soft: rgba(42, 120, 214, 0.12);
-  --warn: #a86a00;
+  --on: #1d66bb;
+  --on-soft: rgba(29, 102, 187, 0.12);
+  --warn: #935c00;
   --bad: #c62828;
   --shadow: 0 10px 34px rgba(20, 30, 50, 0.16);
   /* wear ramp, light to dark: mirrors WEAR_RAMP.day in world/sim-view.ts */
