@@ -46,6 +46,7 @@ export interface SimPanel {
   setView(v: BlockView): void
   /** re-read palette colours into the legend and capacity bar */
   repaint(): void
+  dispose(): void
 }
 
 /* ---- formatting ------------------------------------------------------------------ */
@@ -296,7 +297,12 @@ export function createSimPanel(
     legendWear,
     el('p', { class: 'note' }, t('mc.note')),
   )
-  rightCol.append(mc.root)
+  // On narrow screens the right column is hidden: the Live card joins the left
+  // column, under the scenario, so the metrics the tour refers to stay reachable.
+  const narrow = typeof window.matchMedia === 'function' ? window.matchMedia('(max-width: 900px)') : null
+  const place = () => (narrow?.matches ? leftCol : rightCol).append(mc.root)
+  place()
+  narrow?.addEventListener?.('change', place)
 
   let view: BlockView = 'state'
   let lastWear = 0
@@ -311,6 +317,9 @@ export function createSimPanel(
   repaint()
 
   return {
+    dispose() {
+      narrow?.removeEventListener?.('change', place)
+    },
     sync() {
       fModel.sync()
       fWork.sync()

@@ -255,8 +255,8 @@ export const BASE_PLAN = {
   phySpanV: [0.2165, 0.7835] as const,
   /** per-channel controller lanes */
   ctrlU: [0.105, 0.43] as const,
-  /** NAND-side PHY / TSV landing strip along the centre */
-  tsvU: [0.105, 0.985] as const,
+  /** NAND-side PHY / TSV landing strip along the centre, ending before the debug blocks */
+  tsvU: [0.105, 0.905] as const,
   /** SRAM banks */
   sramU: [0.46, 0.9] as const,
   /** shared test and debug blocks at the far edge */

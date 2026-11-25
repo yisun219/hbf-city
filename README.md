@@ -11,7 +11,7 @@ by TSVs; open a stack to see its layers, slide a die out to see all 32 planes
 and 16,384 blocks, or lift the core dies to see the base die's UCIe PHYs,
 channel controllers and SRAM.
 
-![HBFCity in dark mode with the serving simulator running: six simulated hours of DeepSeek-V3 on the To-C trace, live metrics on the right](docs/sim-night.jpg)
+![HBFCity in dark mode with the serving simulator running: ten simulated hours of DeepSeek-V3 on the To-C trace, live metrics on the right](docs/sim-night.jpg)
 
 A serving simulator runs underneath: synthetic LLM sessions drawn from
 production trace statistics are batched on the GPU, their KV cache is written

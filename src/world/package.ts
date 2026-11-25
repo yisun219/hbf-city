@@ -22,8 +22,9 @@ export interface PackageModule extends WorldModule {
  *   interposer   silicon; its top surface is y = 0 and carries the wiring
  *   UCIe lanes   16 host channels per stack crossing the gap to the GPU
  *
- * Capacitor heights scale with the vertical exaggeration like everything
- * else, so their height relative to the dies stays true (0402 parts).
+ * Capacitors are 0201 parts (0.6 x 0.3 x 0.3 mm). Their height follows the
+ * vertical exaggeration only up to 1.6x, so at 12x they do not stand like
+ * fences around the package; the substrate's note says so.
  * ==========================================================================*/
 
 const _m = new THREE.Matrix4()
@@ -294,9 +295,10 @@ export function createPackage(ctx: WorldContext): PackageModule {
       district: 'package',
       object: lanes,
       instances: Array.from({ length: HBF.channelsPerStack }, (_, c) => site.index * HBF.channelsPerStack + c),
+      // the lanes overlap 4 units into each PHY (see the lane layout above)
       bounds: (out) => out.set(
-        _p.set(Math.min(gpuEdge, site.phyEdgeX), 0, site.z - STACK.width * 0.3),
-        _s.set(Math.max(gpuEdge, site.phyEdgeX), 2, site.z + STACK.width * 0.3),
+        _p.set(Math.min(gpuEdge, site.phyEdgeX) - 4, 0, site.z - STACK.width * 0.3),
+        _s.set(Math.max(gpuEdge, site.phyEdgeX) + 4, 2, site.z + STACK.width * 0.3),
       ),
       tier: 2,
       doc: 'ucie',

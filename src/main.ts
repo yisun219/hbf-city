@@ -145,7 +145,8 @@ async function boot(): Promise<void> {
   }
   const pStack = params.has('stack') ? Number(params.get('stack')) : NaN
   if (Number.isInteger(pStack) && pStack >= 0 && pStack < N) state.focusStack = pStack
-  const pOpen = params.has('open') ? clamp(Number(params.get('open')), 0, 1) : 0.62
+  const openParam = Number(params.get('open'))
+  const pOpen = params.has('open') && Number.isFinite(openParam) ? clamp(openParam, 0, 1) : 0.62
   state.explodeTarget[state.focusStack] = pOpen
   const pScale = params.has('scale') ? Number(params.get('scale')) : NaN
   if (pScale >= 1 && pScale <= 24) {
@@ -294,11 +295,19 @@ async function boot(): Promise<void> {
       center.y = 50
       dir = [0, 0.5, out]
       distance = clamp(r * 4 + 140, 300, 700)
+    } else if (site && (def.doc === 'tsv' || def.doc === 'tsvPower')) {
+      // TSVs run between the dies: from beside the opened stack, level with its middle
+      dir = [-site.inward * 0.6, 0.35, 0.75]
+      distance = clamp(r * 1.5 + 60, 160, 700)
     } else if (site && def.district === 'stack' && def.id !== `stack.${def.stack}`) {
       // base-die parts: look down into the opened gap from outside the stack
       center.y = box.max.y
       dir = [-site.inward * 0.7, 1.2, 0.6]
       distance = clamp(Math.max(size.x, size.z) * 2.1 + 60, 80, 620)
+    } else if (site && def.district === 'gpu') {
+      // a GPU part facing a stack: from above the GPU, so no stack stands in between
+      dir = [site.inward * 0.35, 1, 0.45]
+      distance = clamp(r * 2.4 + 80, 160, 600)
     } else if (site) {
       dir = [-site.inward * 0.7, 0.62, 0.62]
     } else if (def.district === 'gpu') {
@@ -310,14 +319,36 @@ async function boot(): Promise<void> {
     return { target: [center.x, center.y, center.z], distance, dir }
   }
 
+  /** A delayed flight still waiting to start; any newer camera move cancels it. */
+  let flyTimer = 0
+  function cancelFlight(): void {
+    if (flyTimer) window.clearTimeout(flyTimer)
+    flyTimer = 0
+  }
   function flyToId(id: string): void {
     const def = registry.get(id)
     if (!def) return
-    // let a die or the base finish moving before framing it
-    const wait = def.die !== undefined || BASE_PARTS.has(def.doc) ? 650 : 0
+    cancelFlight()
+    // let a die, the base or an opening stack finish moving before framing it
+    const wait = def.die !== undefined || BASE_PARTS.has(def.doc) || def.doc === 'tsv' || def.doc === 'tsvPower' ? 650 : 0
     if (settleMode) rig.flyTo(focusFor(def), 0.001)
-    else window.setTimeout(() => rig.flyTo(focusFor(def)), wait)
+    else if (wait === 0) rig.flyTo(focusFor(def))
+    else
+      flyTimer = window.setTimeout(() => {
+        flyTimer = 0
+        rig.flyTo(focusFor(def))
+      }, wait)
   }
+  const home = () => {
+    cancelFlight()
+    goHome(rig)
+  }
+  const overview = () => {
+    cancelFlight()
+    goOverview(rig)
+  }
+  // a drag or zoom by the reader wins over a flight that has not started yet
+  rig.controls.addEventListener('start', cancelFlight)
 
   /* ---- selection --------------------------------------------------------------- */
   /** Open the stack and slide out the die, or lift the cores off a base part, as selecting `def` does. */
@@ -332,6 +363,11 @@ async function boot(): Promise<void> {
       // uncover the base die: lift the whole core-die stack off it
       const s = def.stack
       for (let k = 0; k < N; k++) state.liftedDieTarget[k] = k === s ? LIFT_BASE : -1
+    } else if (def?.stack !== undefined && (def.doc === 'tsv' || def.doc === 'tsvPower')) {
+      // TSVs only show between the dies of an opened stack
+      const s = def.stack
+      state.explodeTarget[s] = Math.max(state.explodeTarget[s], 0.7)
+      for (let k = 0; k < N; k++) state.liftedDieTarget[k] = -1
     } else {
       for (let k = 0; k < N; k++) state.liftedDieTarget[k] = -1
     }
@@ -351,12 +387,20 @@ async function boot(): Promise<void> {
     labels.setHighlight(id)
     inspector.show(id)
     hud.setRightVisible(!id)
+    peeking = false
     // keep the subject clear of the inspector on wide screens
-    rig.setRightInset(id && window.innerWidth > 900 ? Math.min(400, window.innerWidth * 0.3) : 0, settleMode)
+    rig.setRightInset(rightInset(), settleMode)
     const def = id ? registry.get(id) : undefined
     stacks.setSelectedDie(def?.stack ?? -1, def?.die ?? -1)
     stage(def)
     hud.sync()
+  }
+
+  /** Space the scene leaves on the right for the inspector or, while peeking, the Live panel. */
+  let peeking = false
+  function rightInset(): number {
+    if (window.innerWidth <= 900) return 0
+    return selected ? Math.min(400, window.innerWidth * 0.3) : peeking ? 330 : 0
   }
 
   /** Frame a part as a selection would, but keep its notes closed so the Live panel stays in view. */
@@ -365,7 +409,8 @@ async function boot(): Promise<void> {
     const def = registry.get(id)
     if (!def) return
     stage(def)
-    rig.setRightInset(window.innerWidth > 900 ? 330 : 0, settleMode)
+    peeking = true
+    rig.setRightInset(rightInset(), settleMode)
     hud.sync()
     flyToId(id)
   }
@@ -437,7 +482,8 @@ async function boot(): Promise<void> {
       el('h3', {}, heading),
       bar,
       list,
-      el('p', { class: 'occ__sub' }, t('occ.sub', { open, mean: (eraseSum / Math.max(1, kvBlocks)).toFixed(1), max: eraseMax })),
+      // an open superblock is one open block row on each die of its domain
+      el('p', { class: 'occ__sub' }, t('occ.sub', { open: open * w, mean: (eraseSum / Math.max(1, kvBlocks)).toFixed(1), max: eraseMax })),
       el('p', { class: 'occ__note' }, t('occ.note', {
         model: MODELS[scenario.model].name,
         workload: t(`wl.${scenario.workload}.name`),
@@ -473,25 +519,41 @@ async function boot(): Promise<void> {
    * the blocks visibly fill while it runs. A new scenario cancels it.
    */
   let skipping: Sim | null = null
-  function skip(seconds: number, toast = true): void {
-    if (skipping === sim) return
-    const target = sim.now + seconds
+  let skipTarget = 0
+  let skipFrom = 0
+  let skipToast = false
+  /** Run the simulator up to `target` seconds; a request during a run extends it. */
+  function skipTo(target: number, toast: boolean): void {
+    if (skipping === sim) {
+      skipTarget = Math.max(skipTarget, target)
+      skipToast ||= toast
+      return
+    }
+    if (target <= sim.now) return
     const s = (skipping = sim)
+    skipTarget = target
+    skipFrom = s.now
+    skipToast = toast
     const slice = () => {
       if (s !== sim) return
       const t0 = performance.now()
-      while (s.now < target && performance.now() - t0 < 30) s.run(Math.min(600, target - s.now))
+      while (s.now < skipTarget && performance.now() - t0 < 30) s.run(Math.min(600, skipTarget - s.now))
       simView.update(s.store, performance.now())
-      if (s.now < target) {
+      // a skip's traffic is not one frame's traffic: keep it out of the die glow
+      activity.resync(s)
+      if (s.now < skipTarget) {
         window.setTimeout(slice, 0)
         return
       }
       skipping = null
       simView.repaintAll(s.store)
-      activity.resync(s)
-      if (toast) bus.emit('toast', { text: t('toast.skipped', { h: (seconds / 3600).toFixed(0) }), ms: 1800 })
+      if (skipToast) bus.emit('toast', { text: t('toast.skipped', { h: Math.round((s.now - skipFrom) / 3600) }), ms: 1800 })
     }
     slice()
+  }
+  /** "+6 h": six more hours after any run already under way. */
+  function skip(seconds: number): void {
+    skipTo((skipping === sim ? skipTarget : sim.now) + seconds, true)
   }
 
   function closeAll(): void {
@@ -507,8 +569,8 @@ async function boot(): Promise<void> {
 
   function buildUi(): void {
     hud = createHud(hudRoot, state, bus, {
-      home: () => goHome(rig),
-      overview: () => goOverview(rig),
+      home,
+      overview,
       toggleTheme: () => {
         toggleThemeMode()
       },
@@ -546,8 +608,8 @@ async function boot(): Promise<void> {
     inspector.setExtra(blockStats)
     inspector.onFocus((id) => flyToId(id))
     tour = createTour(hud.bottom, {
-      home: () => goHome(rig),
-      overview: () => goOverview(rig),
+      home,
+      overview,
       focus: (id) => {
         select(id)
         flyToId(id)
@@ -566,9 +628,7 @@ async function boot(): Promise<void> {
       setPlaying: (v) => {
         playing = v
       },
-      ensureTime: (seconds) => {
-        if (sim.now < seconds) skip(seconds - sim.now, false)
-      },
+      ensureTime: (seconds) => skipTo(seconds, false),
     })
     inspector.show(selected)
     hud.setRightVisible(!selected)
@@ -581,6 +641,7 @@ async function boot(): Promise<void> {
     const at = tour.index
     tour.stop()
     inspector.dispose()
+    panel.dispose()
     hud.dispose()
     buildUi()
     labels.relabel()
@@ -615,8 +676,8 @@ async function boot(): Promise<void> {
       const anyClosed = state.explodeTarget.some((v) => v < 0.3)
       for (let s = 0; s < N; s++) state.explodeTarget[s] = anyClosed ? 0.65 : 0
       hud.sync()
-    } else if (k === 'h') goHome(rig)
-    else if (k === 'o') goOverview(rig)
+    } else if (k === 'h') home()
+    else if (k === 'o') overview()
     else if (k === 'n') toggleThemeMode()
     else if (k === 't') tour.start()
     else if (k === 'w') setView(simView.mode === 'wear' ? 'state' : 'wear')
@@ -657,7 +718,7 @@ async function boot(): Promise<void> {
   }
   if (view === 'stack') flyToId(`stack.${state.focusStack}`)
   const pFocus = params.get('focus')
-  if (pFocus && registry.get(pFocus)) flyToId(pFocus)
+  if (pFocus && registry.get(pFocus)) bus.emit('focus', { id: pFocus })
   const pTour = params.has('tour') ? Number(params.get('tour')) : NaN
   if (Number.isInteger(pTour) && pTour >= 1 && pTour <= 8) {
     tour.start()
@@ -686,6 +747,7 @@ async function boot(): Promise<void> {
   /* ---- loop ------------------------------------------------------------------ */
   let last = performance.now()
   let lastPanel = 0
+  let lastLive = 0
   function frame(now: number): void {
     const dt = Math.min(0.1, Math.max(0, (now - last) / 1000))
     last = now
@@ -704,6 +766,12 @@ async function boot(): Promise<void> {
     if (now - lastPanel > 200) {
       lastPanel = now
       panel.update(sim, playing, speed, load, simView.wearRange)
+      // the selected die's statistics and the block under a resting cursor are live too
+      if (now - lastLive > 1000) {
+        lastLive = now
+        inspector.refreshExtra()
+        picker.refresh()
+      }
     }
 
     for (const m of modules) m.update(dt, state)
@@ -714,8 +782,15 @@ async function boot(): Promise<void> {
     labels.render(scene, camera)
     requestAnimationFrame(frame)
   }
+  /** Label ranges stretch with the camera pull-back that narrow screens get (see fitted()). */
+  const labelScale = () => Math.min(2.3, Math.max(1, Math.sqrt(1.6 / (window.innerWidth / Math.max(1, window.innerHeight)))))
   labels.resize(window.innerWidth, window.innerHeight)
-  window.addEventListener('resize', () => labels.resize(window.innerWidth, window.innerHeight))
+  labels.setRangeScale(labelScale())
+  window.addEventListener('resize', () => {
+    labels.resize(window.innerWidth, window.innerHeight)
+    labels.setRangeScale(labelScale())
+    rig.setRightInset(rightInset(), true)
+  })
   requestAnimationFrame(frame)
 }
 

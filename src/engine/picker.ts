@@ -16,6 +16,8 @@ export interface Picker {
   update(): void
   setSelected(id: string | null): void
   setHovered(id: string | null): void
+  /** pick again at the last pointer position on the next frame (the scene or camera moved) */
+  refresh(): void
 }
 
 const BRACKET_SEGMENTS = 24
@@ -122,12 +124,15 @@ export function createPicker(opts: {
     return null
   }
 
+  let inside = false
   dom.addEventListener('pointermove', (e) => {
     lastX = e.clientX
     lastY = e.clientY
+    inside = true
     pending = true
   })
   dom.addEventListener('pointerleave', () => {
+    inside = false
     pending = false
     bus.emit('hover', { id: null })
     onHoverHit?.(null, 0, 0)
@@ -180,6 +185,9 @@ export function createPicker(opts: {
     setHovered(id) {
       hovered = id
       dom.style.cursor = id ? 'pointer' : ''
+    },
+    refresh() {
+      if (inside) pending = true
     },
   }
 }

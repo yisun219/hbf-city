@@ -20,6 +20,8 @@ export interface Labels {
   relabel(): void
   render(scene: THREE.Scene, camera: THREE.Camera): void
   resize(w: number, h: number): void
+  /** stretch the label distance ranges, e.g. when a narrow screen pulls the camera back */
+  setRangeScale(k: number): void
   setHighlight(id: string | null): void
 }
 
@@ -42,6 +44,7 @@ export function createLabels(root: HTMLElement, registry: Registry, bus: Bus): L
   root.classList.add('labels-root')
   const group = new THREE.Group()
   group.name = 'labels'
+  let rangeScale = 1
   const tags: Tag[] = []
   let highlighted: string | null = null
 
@@ -96,7 +99,7 @@ export function createLabels(root: HTMLElement, registry: Registry, bus: Bus): L
       const d = camera.position.distanceTo(_c)
       const allowed =
         (enabled || def.id === highlighted) &&
-        (def.id === highlighted || (d < RANGE[def.tier] && (def.labelWhen ? def.labelWhen() : true)))
+        (def.id === highlighted || (d < RANGE[def.tier] * rangeScale && (def.labelWhen ? def.labelWhen() : true)))
       if (allowed) candidates.push({ tag, d: d * (1 + def.tier * 0.6) })
       else tag.obj.visible = false
     }
@@ -122,6 +125,9 @@ export function createLabels(root: HTMLElement, registry: Registry, bus: Bus): L
     render(scene, camera) {
       if (group.parent !== scene) scene.add(group)
       css.render(scene, camera)
+    },
+    setRangeScale(k) {
+      rangeScale = k
     },
     resize(w, h) {
       css.setSize(w, h)

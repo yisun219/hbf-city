@@ -142,6 +142,7 @@ export const DIE_READ_BPS = (HBF.planesPerDie * HBF.pageBytes) / (HBF.readUs * 1
 /** Bytes per second one die programs at 75 µs per page. */
 export const DIE_PROGRAM_BPS = (HBF.planesPerDie * HBF.pageBytes) / (HBF.programUs * 1e-6)
 const ERASE_S = HBF.eraseUs * 1e-6
+const BLOCKS_PER_DOMAIN = HBF.blocksPerPlane
 const LAUNCH_S = 0.0005
 /**
  * Valid KV above this share of capacity triggers eviction down to the second.
@@ -167,6 +168,12 @@ const TAU_SLOW = 300
 const WEAR_SETTLE_TURNOVERS = 2
 const WEAR_MIN_S = 2 * 3600
 const WEAR_SAMPLE_S = 300
+/**
+ * The hottest blocks' rate is measured on the mean of this many most-erased
+ * blocks: a single maximum grows by one or two erases in a few hours, too
+ * coarse to project from.
+ */
+const WEAR_TOP = 16
 
 interface Session {
   id: number
@@ -235,7 +242,7 @@ export interface SimMetrics {
 export interface WearStats {
   mean: number
   max: number
-  /** erases per second of the most-erased block since the cache settled; NaN until WEAR_MIN_S after that */
+  /** erases per second of the most-erased blocks (mean of the top WEAR_TOP) since the cache settled; NaN until WEAR_MIN_S after that */
   rate: number
   /** projected seconds until the most-erased block reaches the P/E limit; NaN without enough history */
   lifeSeconds: number
@@ -298,10 +305,32 @@ export function createSim(opts: Partial<SimOptions> = {}): Sim {
   let refusedSeen = 0
   /** finished requests whose last KV is still in SRAM because the store had no room */
   let stalled: Request[] = []
-  /** when the wear projection starts, and the hottest block's erase count then */
+  /** when the wear projection starts, and the hottest blocks' mean erase count then */
   let wearStart = NaN
-  let wearStartMax = 0
+  let wearStartTop = 0
   let wearChecked = -Infinity
+  const topBuf = new Float64Array(WEAR_TOP)
+  /** mean erase count of the WEAR_TOP most-erased KV superblocks */
+  function topMean(): number {
+    topBuf.fill(0)
+    const er = store.erase
+    const weightRows = store.weightRows
+    for (let sb = 0; sb < store.superblocks; sb++) {
+      if (sb % BLOCKS_PER_DOMAIN < weightRows) continue
+      const e = er[sb]
+      if (e <= topBuf[WEAR_TOP - 1]) continue
+      // insert into the descending top list
+      let i = WEAR_TOP - 1
+      while (i > 0 && topBuf[i - 1] < e) {
+        topBuf[i] = topBuf[i - 1]
+        i--
+      }
+      topBuf[i] = e
+    }
+    let sum = 0
+    for (let i = 0; i < WEAR_TOP; i++) sum += topBuf[i]
+    return sum / WEAR_TOP
+  }
 
   const heap: Arrival[] = []
   const waiting: Request[] = []
@@ -644,7 +673,7 @@ export function createSim(opts: Partial<SimOptions> = {}): Sim {
     wearChecked = now
     if ((store.stats.hostPages + store.stats.gcPages) / store.kvPages >= WEAR_SETTLE_TURNOVERS) {
       wearStart = now
-      wearStartMax = store.stats.maxErase
+      wearStartTop = topMean()
     }
   }
 
@@ -705,9 +734,9 @@ export function createSim(opts: Partial<SimOptions> = {}): Sim {
       const mean = store.stats.erases / Math.max(1, store.kvSuperblocks)
       const max = store.stats.maxErase
       // The first block to wear out is the most-erased one: project from how
-      // fast the maximum has grown since the cache settled into its turnover.
+      // fast the most-erased blocks have been erased since the cache settled.
       if (Number.isNaN(wearStart) || now - wearStart < WEAR_MIN_S) return { mean, max, rate: NaN, lifeSeconds: NaN }
-      const rate = (max - wearStartMax) / (now - wearStart)
+      const rate = (topMean() - wearStartTop) / (now - wearStart)
       const lifeSeconds = rate > 0 ? Math.max(0, HBF.peCycles - max) / rate : Infinity
       return { mean, max, rate, lifeSeconds }
     },

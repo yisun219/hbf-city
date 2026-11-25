@@ -72,10 +72,15 @@ export function createGpu(ctx: WorldContext): GpuModule {
   const smRows = 3
   const totalSms = GPU.gpcs * GPU.tpcsPerGpc * GPU.smsPerTpc
 
-  // Which SMs are fused off varies chip to chip; this pattern is an example.
+  // H100 SXM5 enables 66 of GH100's 72 TPCs, so SMs go dark in TPC pairs.
+  // Which TPCs are fused off varies chip to chip; this pattern is an example.
+  // SMs are numbered along each GPC's rows, so SMs 2k and 2k+1 form TPC k.
   const rng = makeRng(0x9100)
   const disabled = new Set<number>()
-  while (disabled.size < totalSms - GPU.enabledSms) disabled.add(Math.floor(rng() * totalSms))
+  const tpcsOff = (totalSms - GPU.enabledSms) / GPU.smsPerTpc
+  const offTpcs = new Set<number>()
+  while (offTpcs.size < tpcsOff) offTpcs.add(Math.floor(rng() * (totalSms / GPU.smsPerTpc)))
+  for (const k of offTpcs) for (let m = 0; m < GPU.smsPerTpc; m++) disabled.add(k * GPU.smsPerTpc + m)
 
   const smBody = new THREE.InstancedMesh(unit, surface({ color: 'computeDim', roughness: 0.55, metalness: 0.25, nightRoughness: 0.6 }), totalSms)
   const roofMat = signal({ color: 'compute', glow: 0.42, nightBase: 0.3 })
@@ -115,7 +120,9 @@ export function createGpu(ctx: WorldContext): GpuModule {
         const z = smZ0 + cellD * (j + 0.5)
         const w = cellW * 0.8
         const d = cellD * 0.78
-        const h = 5.2
+        // short enough that roofs and tensor cores stay inside the die's true
+        // 775 µm thickness when heights are shown at true scale
+        const h = 4.6
         put(smBody, sm, x, ACTIVE + 0.5, z, w, h, d)
         if (disabled.has(sm)) {
           put(smOff, off++, x, ACTIVE + 0.5 + h, z, w * 0.96, 0.4, d * 0.96)
@@ -125,7 +132,7 @@ export function createGpu(ctx: WorldContext): GpuModule {
           for (let t = 0; t < 4; t++) {
             const tx = x + (t % 2 === 0 ? -1 : 1) * w * 0.22
             const tz = z + (t < 2 ? -1 : 1) * d * 0.22
-            put(tensor, on * 4 + t, tx, ACTIVE + 0.85 + h, tz, w * 0.3, 1.2, d * 0.3)
+            put(tensor, on * 4 + t, tx, ACTIVE + 0.85 + h, tz, w * 0.3, 0.8, d * 0.3)
           }
           // L1 / shared memory along one side of the SM
           put(l1, on, x, ACTIVE + 0.5, z + d * 0.5 + 0.35, w * 0.9, 2.2, 0.7)
@@ -223,7 +230,7 @@ export function createGpu(ctx: WorldContext): GpuModule {
     ghostEdges.scale.copy(ghost.scale)
     ghostEdges.position.copy(ghost.position)
     ghost.visible = state.showBulkSilicon
-    ghostEdges.visible = true
+    ghostEdges.visible = state.showBulkSilicon
   }
   layoutGhost(ctx.state)
 
@@ -253,6 +260,9 @@ export function createGpu(ctx: WorldContext): GpuModule {
     bounds: (out) => out.set(_p.set(-HX, ACTIVE, -HZ), _s.set(HX, gpuHeight(ctx.state.verticalScale), HZ)),
     tier: 2,
     doc: 'bulk',
+    labelWhen: () => ctx.state.showBulkSilicon,
+    // at a top corner, not on the GPU die's own label at the top centre
+    labelAt: (out) => out.set(-HX * 0.7, gpuHeight(ctx.state.verticalScale), -HZ * 0.7),
   })
   const smPerGpc = GPU.tpcsPerGpc * GPU.smsPerTpc
   for (let g = 0; g < GPU.gpcs; g++) {
@@ -265,7 +275,7 @@ export function createGpu(ctx: WorldContext): GpuModule {
       district: 'gpu',
       object: smBody,
       instances: Array.from({ length: smPerGpc }, (_, j) => g * smPerGpc + j),
-      bounds: bb(cx - w / 2, 0, cz - d / 2, cx + w / 2, ACTIVE + 8, cz + d / 2),
+      bounds: bb(cx - w / 2, 0, cz - d / 2, cx + w / 2, ACTIVE + 6.3, cz + d / 2),
       tier: 2,
       doc: 'gpc',
       color: 'compute',
@@ -287,7 +297,6 @@ export function createGpu(ctx: WorldContext): GpuModule {
   for (const site of STACK_SITES) {
     const edge = site.side === 'west' ? -HX : HX
     const inward = site.side === 'west' ? 1 : -1
-    const xa = edge
     const xb = edge + inward * (GPU_PLAN.phyDepth + GPU_PLAN.mcDepth)
     ctx.register({
       id: `gpu.phy.${site.index}`,
@@ -297,7 +306,11 @@ export function createGpu(ctx: WorldContext): GpuModule {
       district: 'gpu',
       object: phy,
       instances: Array.from({ length: HBF.channelsPerStack }, (_, c) => site.index * HBF.channelsPerStack + c),
-      bounds: bb(Math.min(xa, xb), 0, site.z - STACK.width / 2, Math.max(xa, xb), ACTIVE + 4, site.z + STACK.width / 2),
+      // the PHY strip: the outer phyDepth of the edge, over the span of the stack's modules
+      bounds: bb(
+        Math.min(edge, edge + inward * GPU_PLAN.phyDepth), 0, stackV(site, BASE_PLAN.phySpanV[0]),
+        Math.max(edge, edge + inward * GPU_PLAN.phyDepth), ACTIVE + 4, stackV(site, BASE_PLAN.phySpanV[1]),
+      ),
       tier: 2,
       doc: 'gpuPhy',
       color: 'link',
@@ -312,7 +325,11 @@ export function createGpu(ctx: WorldContext): GpuModule {
       district: 'gpu',
       object: mc,
       instances: [site.index],
-      bounds: bb(Math.min(xa, xb), 0, site.z - STACK.width * 0.36, Math.max(xa, xb), ACTIVE + 4, site.z + STACK.width * 0.36),
+      // the controller sits just inside the PHY strip
+      bounds: bb(
+        Math.min(edge + inward * GPU_PLAN.phyDepth, xb), 0, site.z - STACK.width * 0.36,
+        Math.max(edge + inward * GPU_PLAN.phyDepth, xb), ACTIVE + 4, site.z + STACK.width * 0.36,
+      ),
       tier: 2,
       doc: 'gpuMc',
       color: 'controller',

@@ -74,6 +74,12 @@ const _hitP = new THREE.Vector3()
 
 /** Signal-TSV columns drawn per stack: two rows along the centre strip. */
 const SIG_COLS = 24
+/**
+ * Where along the stack (u, from the GPU-facing edge) the signal columns
+ * stand: inside the core dies' TSV strip and the base die's landing strip,
+ * clear of the UCIe PHYs at the near edge and the debug blocks at the far one.
+ */
+const SIG_U = [0.12, 0.9] as const
 /** Power-TSV columns per stack: one row along each long edge. */
 const PWR_COLS = 12
 
@@ -279,7 +285,7 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
     for (let r = 0; r < 2; r++) {
       const v = r === 0 ? 0.5 - DIE_PLAN.spineHalf * 0.5 : 0.5 + DIE_PLAN.spineHalf * 0.5
       for (let c = 0; c < SIG_COLS; c++) {
-        const u = 0.08 + (c / (SIG_COLS - 1)) * 0.86
+        const u = SIG_U[0] + (c / (SIG_COLS - 1)) * (SIG_U[1] - SIG_U[0])
         const i = (s * 2 + r) * SIG_COLS + c
         setBox(sigTsv, i, stackU(site, u), y0, stackV(site, v), 0.55, y1 - y0, 0.55)
       }
@@ -339,7 +345,8 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
       object: baseDies,
       instances: [s],
       bounds: (out) => out.set(_p.set(minX, L.baseBottom, minZ), _s.set(maxX, L.baseTop, maxZ)),
-      tier: 2,
+      // tier 1: named from tour stop 2's distance, and only while the stack is open
+      tier: 1,
       doc: 'base',
       stack: s,
       labelWhen: opened,
@@ -352,7 +359,9 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
       for (const i of range(k)) {
         const b = list[i]
         out.expandByPoint(_p.set(b.x - b.sx / 2, L.baseTop, b.z - b.sz / 2))
-        out.expandByPoint(_p.set(b.x + b.sx / 2, L.baseTop + Math.max(1, (L.bondBottom[0] - L.baseTop) * 0.55), b.z + b.sz / 2))
+        // as tall as drawn (see layoutStack), so brackets and labels sit on the blocks
+        const h = clamp((L.bondBottom[0] - L.baseTop) * 0.55, 0.04, 6) * b.h
+        out.expandByPoint(_p.set(b.x + b.sx / 2, L.baseTop + Math.max(0.5, h), b.z + b.sz / 2))
       }
       return out
     }
@@ -394,6 +403,12 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
           const dx = ctx.state.liftedDie[s] === d ? slideX[s] : 0
           return out.set(_p.set(minX + dx, L.dieBottom[d], minZ), _s.set(maxX + dx, L.dieTop[d], maxZ))
         },
+        // at the die's far end, so the dies' labels form a column clear of the
+        // stack's own label at the top centre
+        labelAt: (out) => {
+          const dx = ctx.state.liftedDie[s] === d ? slideX[s] : 0
+          return out.set(stackU(site, 0.86) + dx, L.dieTop[d], site.z)
+        },
         tier: 2,
         doc: 'coreDie',
         color: 'kv',
@@ -410,8 +425,13 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
       district: 'stack',
       object: sigTsv,
       instances: Array.from({ length: SIG_COLS * 2 }, (_, j) => s * SIG_COLS * 2 + j),
-      bounds: (out) => out.set(_p.set(minX, L.baseTop, site.z - 4), _s.set(maxX, L.top, site.z + 4)),
-      tier: 2,
+      bounds: (out) => {
+        const ua = stackU(site, SIG_U[0])
+        const ub = stackU(site, SIG_U[1])
+        return out.set(_p.set(Math.min(ua, ub), L.baseTop, site.z - 4), _s.set(Math.max(ua, ub), L.top, site.z + 4))
+      },
+      labelAt: (out) => out.set(stackU(site, 0.2), (L.baseTop + L.top) / 2, site.z),
+      tier: 1,
       doc: 'tsv',
       color: 'tsv',
       stack: s,
@@ -426,10 +446,12 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activ
       object: pwrTsv,
       instances: Array.from({ length: PWR_COLS * 2 }, (_, j) => s * PWR_COLS * 2 + j),
       bounds: (out) => out.set(_p.set(minX, L.baseTop, minZ), _s.set(maxX, L.top, maxZ)),
-      tier: 2,
+      labelAt: (out) => out.set(stackU(site, 0.7), (L.baseTop + L.top) / 2, stackV(site, (DIE_PLAN.powerRow[0] + DIE_PLAN.powerRow[1]) / 2)),
+      tier: 1,
       doc: 'tsvPower',
       color: 'copper',
       stack: s,
+      labelWhen: opened,
     })
   }
 

@@ -21,6 +21,8 @@ export interface Inspector {
   dispose(): void
   /** extra live rows supplied by main (e.g. simulated block counts) */
   setExtra(render: ((def: ComponentDef) => HTMLElement | null) | null): void
+  /** rebuild only the live statistics section, keeping the reader's scroll position */
+  refreshExtra(): void
 }
 
 function md(text: string): DocumentFragment {
@@ -45,10 +47,12 @@ export function createInspector(root: HTMLElement, registry: Registry, bus: Bus)
   let extra: ((def: ComponentDef) => HTMLElement | null) | null = null
   let current: string | null = null
   let focusFn: ((id: string) => void) | null = null
+  let extraEl: HTMLElement | null = null
 
   function render(def: ComponentDef): void {
     const doc = docFor(def.doc)
     panel.replaceChildren()
+    extraEl = null
     const close = el('button', { class: 'inspector__close', type: 'button', 'aria-label': t('common.close') }, '×')
     close.addEventListener('click', () => bus.emit('select', { id: null }))
     const focus = el('button', { class: 'btn btn--small', type: 'button' }, t('insp.focus'))
@@ -70,7 +74,8 @@ export function createInspector(root: HTMLElement, registry: Registry, bus: Bus)
     panel.append(body)
     body.append(el('p', { class: 'inspector__tldr' }, md(doc.tldr)))
 
-    const x = extra?.(def)
+    const x = extra?.(def) ?? null
+    extraEl = x
     if (x) body.append(x)
 
     if (doc.facts?.length) {
@@ -123,6 +128,14 @@ export function createInspector(root: HTMLElement, registry: Registry, bus: Bus)
     },
     onFocus(fn) {
       focusFn = fn
+    },
+    refreshExtra() {
+      if (!current || !extra || !extraEl || panel.hidden) return
+      const def = registry.get(current)
+      const x = def ? extra(def) : null
+      if (!x) return
+      extraEl.replaceWith(x)
+      extraEl = x
     },
     dispose() {
       panel.remove()
