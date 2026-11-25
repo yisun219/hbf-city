@@ -16,7 +16,7 @@ import { el } from './dom'
 
 export interface Inspector {
   show(id: string | null): void
-  /** extra live rows supplied by main (e.g. illustrative block counts) */
+  /** extra live rows supplied by main (e.g. simulated block counts) */
   setExtra(render: ((def: ComponentDef) => HTMLElement | null) | null): void
 }
 

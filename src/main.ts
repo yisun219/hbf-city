@@ -4,33 +4,50 @@ import './styles/app.css'
 import { createBus } from './core/bus'
 import { HBF } from './core/hbf-spec'
 import { Registry } from './core/registry'
-import { onThemeMode, setThemeMode, themeMode, toggleThemeMode } from './core/theme'
+import { P, onThemeMode, setThemeMode, themeMode, themed, toggleThemeMode } from './core/theme'
 import type { ComponentDef, FocusSpec, SceneState, WorldContext, WorldModule } from './core/types'
 import { clamp, damp } from './core/util'
 import { createCameraRig } from './engine/camera'
 import { createLabels } from './engine/labels'
 import { createPicker } from './engine/picker'
 import { createRenderer } from './engine/renderer'
+import { MODELS } from './sim/models'
+import type { ModelId } from './sim/models'
+import { createSim, suggestedLoad } from './sim/sim'
+import type { Sim } from './sim/sim'
+import { BLOCKS, POLICIES, SbState, WIDTHS } from './sim/store'
+import type { InterleaveWidth, PolicyId } from './sim/store'
+import { TRACES } from './sim/workload'
+import type { WorkloadId } from './sim/workload'
 import { el } from './ui/dom'
 import { createHud } from './ui/hud'
 import { createInspector } from './ui/panel'
+import { SPEEDS, createSimPanel } from './ui/sim-panel'
+import type { Scenario } from './ui/sim-panel'
+import { createActivity } from './world/activity'
 import { createGpu } from './world/gpu'
 import { createStacks } from './world/hbf-stack'
 import { DEFAULT_VERTICAL_SCALE, FEATURED_STACK, LIFT_BASE, STACK_SITES, VIEW } from './world/layout'
-import { BlockState, createOccupancyAtlas } from './world/occupancy'
+import { createOccupancyAtlas } from './world/occupancy'
 import { createPackage } from './world/package'
+import { createSimView } from './world/sim-view'
+import type { BlockView } from './world/sim-view'
 import { createSky } from './world/sky'
-import { P, themed } from './core/theme'
 
 /* ============================================================================
  * HBFCity — boot.
  *
- * Order: renderer -> camera -> world -> labels and picking -> UI -> loop.
- * The world reads SceneState; the UI edits it and talks over the bus.
+ * Order: renderer -> camera -> world -> simulator -> labels and picking ->
+ * UI -> loop. The world reads SceneState and the simulator; the UI edits
+ * SceneState and the scenario and talks over the bus.
  *
  * URL parameters (for review and screenshots):
  *   theme=day|night   view=home|overview|stack   stack=0..5   open=0..1
- *   die=0..15         scale=1..12               labels=0|1  select=<id>
+ *   die=0..15         scale=1..12   labels=0|1   select=<id>  focus=<id>
+ *   model=deepseek-v3|qwen3-235b|hunyuan3   workload=toC|toB|coding|thinking
+ *   policy=hbflex|arrival   width=1|4|16   load=<x suggested>   speed=<sim s per s>
+ *   play=0|1   skip=<hours simulated before the first frame>   blocks=state|wear
+ *   settle=1 jumps animations to their targets
  * ==========================================================================*/
 
 const params = new URLSearchParams(location.search)
@@ -54,6 +71,13 @@ function progress(pct: number, label: string): Promise<void> {
     requestAnimationFrame(go)
     setTimeout(go, 30)
   })
+}
+
+function pick<T extends string | number>(name: string, allowed: readonly T[], fallback: T): T {
+  const v = params.get(name)
+  if (v === null) return fallback
+  const hit = allowed.find((a) => String(a) === v)
+  return hit ?? fallback
 }
 
 async function boot(): Promise<void> {
@@ -126,18 +150,55 @@ async function boot(): Promise<void> {
     return m
   }
 
-  await progress(45, 'Package and interposer')
-  add(createPackage(ctx))
+  await progress(42, 'Package and interposer')
+  const pkg = add(createPackage(ctx))
 
-  await progress(60, 'GPU die')
-  add(createGpu(ctx))
+  await progress(55, 'GPU die')
+  const gpu = add(createGpu(ctx))
 
-  await progress(72, 'NAND block atlas (1.57 M blocks)')
+  await progress(66, 'NAND block atlas (1.57 M blocks)')
   const occupancy = createOccupancyAtlas()
-  themed((mode, palette) => occupancy.repaint(mode, palette))
+  const activity = createActivity()
+  const simView = createSimView(occupancy)
 
-  await progress(84, 'HBF stacks')
-  const stacks = add(createStacks(ctx, occupancy))
+  await progress(76, 'HBF stacks')
+  const stacks = add(createStacks(ctx, occupancy, activity))
+
+  /* ---- simulator ------------------------------------------------------------- */
+  await progress(84, 'Serving simulator')
+  const modelIds = Object.keys(MODELS) as ModelId[]
+  const workloadIds = Object.keys(TRACES) as WorkloadId[]
+  const policyIds = Object.keys(POLICIES) as PolicyId[]
+  let scenario: Scenario = {
+    model: pick('model', modelIds, 'deepseek-v3'),
+    workload: pick('workload', workloadIds, 'toC'),
+    policy: pick('policy', policyIds, 'hbflex'),
+    width: pick<InterleaveWidth>('width', WIDTHS, 1),
+    loadScale: params.has('load') ? clamp(Number(params.get('load')) || 1, 0.25, 1.5) : 1,
+  }
+  const speeds = SPEEDS.map((s) => s.value)
+  let speed = params.has('speed') ? Number(params.get('speed')) || 600 : 600
+  if (!speeds.includes(speed)) speeds.push(speed)
+  let playing = params.get('play') !== '0'
+  let load = 0
+  let sim: Sim = makeSim(scenario)
+
+  function makeSim(s: Scenario): Sim {
+    load = Math.min(1.5, suggestedLoad(s.model, s.workload) * s.loadScale)
+    return createSim({ model: s.model, workload: s.workload, policy: s.policy, width: s.width, load, seed: 7 })
+  }
+
+  themed((mode, palette) => {
+    simView.setPalette(mode, palette)
+    simView.repaintAll(sim.store)
+  })
+
+  const skipHours = params.has('skip') ? clamp(Number(params.get('skip')) || 0, 0, 72) : 0
+  if (skipHours > 0) {
+    await progress(88, `Simulating ${skipHours} h of serving`)
+    sim.run(skipHours * 3600)
+    simView.repaintAll(sim.store)
+  }
 
   await progress(92, 'Labels')
   const labels = createLabels(labelsRoot, registry, bus)
@@ -183,6 +244,7 @@ async function boot(): Promise<void> {
     picker.setSelected(id)
     labels.setHighlight(id)
     inspector.show(id)
+    panel.setMetricsVisible(!id)
     // keep the subject clear of the inspector on wide screens
     rig.setRightInset(id && window.innerWidth > 900 ? Math.min(400, window.innerWidth * 0.3) : 0, settleMode)
     const def = id ? registry.get(id) : undefined
@@ -210,21 +272,53 @@ async function boot(): Promise<void> {
     const def = id ? registry.get(id) : undefined
     if (!def) return
     if (selected !== id) select(id)
-    // let a lifted die finish rising before framing it
+    // let a lifted die finish moving before framing it
     window.setTimeout(() => rig.flyTo(focusFor(def)), def.die !== undefined ? 650 : 0)
   })
   bus.on('scene:changed', () => hud.sync())
 
+  /** Live block statistics of one die (its interleave domain) or a whole stack. */
   inspector.setExtra((def) => {
     if (def.stack === undefined || (def.doc !== 'coreDie' && def.doc !== 'stack')) return null
-    const c = occupancy.counts(def.stack, def.die)
-    const total = c[BlockState.Free] + c[BlockState.Weights] + c[BlockState.Kv] + c[BlockState.KvOpen] + c[BlockState.Invalid]
+    const store = sim.store
+    const w = store.width
+    const perStack = HBF.diesPerStack / w
+    const doms =
+      def.die !== undefined
+        ? [def.stack * perStack + (def.die % perStack)]
+        : Array.from({ length: perStack }, (_, k) => def.stack! * perStack + k)
+    let weights = 0
+    let free = 0
+    let open = 0
+    let validPages = 0
+    let invalidPages = 0
+    let eraseSum = 0
+    let eraseMax = 0
+    let kvBlocks = 0
+    for (const d of doms) {
+      for (let b = 0; b < BLOCKS; b++) {
+        const sb = d * BLOCKS + b
+        const st = store.state[sb]
+        if (st === SbState.Weights) {
+          weights++
+          continue
+        }
+        kvBlocks++
+        eraseSum += store.erase[sb]
+        eraseMax = Math.max(eraseMax, store.erase[sb])
+        if (st === SbState.Free) free++
+        else if (st === SbState.Open) open++
+        validPages += store.valid[sb]
+        invalidPages += store.written[sb] - store.valid[sb]
+      }
+    }
+    const total = (weights + kvBlocks) * 512
+    const freePages = total - weights * 512 - validPages - invalidPages
     const rows: [string, number, keyof typeof P][] = [
-      ['Weights', c[BlockState.Weights], 'weights'],
-      ['KV cache', c[BlockState.Kv], 'kv'],
-      ['Open KV blocks', c[BlockState.KvOpen], 'kvTail'],
-      ['Invalid', c[BlockState.Invalid], 'invalid'],
-      ['Free', c[BlockState.Free], 'free'],
+      ['Weights', weights * 512, 'weights'],
+      ['Valid KV', validPages, 'kv'],
+      ['Invalid', invalidPages, 'invalid'],
+      ['Free', freePages, 'free'],
     ]
     const bar = el('div', { class: 'occ__bar' })
     const list = el('div', { class: 'occ__list' })
@@ -235,11 +329,13 @@ async function boot(): Promise<void> {
       bar.append(seg)
       list.append(el('span', {}, `${label} ${((100 * count) / total).toFixed(1)}%`))
     }
+    const scope = def.die !== undefined ? (w > 1 ? `this die and the ${w - 1} it is interleaved with` : 'this die') : 'this stack'
     return el('section', { class: 'occ' },
-      el('h3', {}, `${total.toLocaleString('en-US')} blocks`),
+      el('h3', {}, `Pages on ${scope}`),
       bar,
       list,
-      el('p', { class: 'occ__note' }, 'Illustrative state — no simulator is connected yet.'),
+      el('p', { class: 'occ__sub' }, `${open} open block rows · erases per block: mean ${(eraseSum / Math.max(1, kvBlocks)).toFixed(1)}, max ${eraseMax}`),
+      el('p', { class: 'occ__note' }, `Simulated: ${MODELS[scenario.model].name}, ${TRACES[scenario.workload].name}, ${POLICIES[scenario.policy].short}.`),
     )
   })
 
@@ -270,6 +366,38 @@ async function boot(): Promise<void> {
     focusStack,
   })
 
+  function setView(v: BlockView): void {
+    simView.mode = v
+    panel.setView(v)
+    simView.repaintAll(sim.store)
+  }
+
+  const panel = createSimPanel(hudRoot, scenario, {
+    togglePlay: () => {
+      playing = !playing
+    },
+    setSpeed: (v) => {
+      speed = v
+      playing = true
+    },
+    setScenario: (s) => {
+      scenario = s
+      sim = makeSim(s)
+      activity.reset()
+      simView.repaintAll(sim.store)
+      panel.sync()
+      inspector.show(selected)
+    },
+    skip: (seconds) => {
+      sim.run(seconds)
+      simView.update(sim.store, performance.now() + 1e6)
+      bus.emit('toast', { text: `Simulated ${(seconds / 3600).toFixed(0)} hours`, ms: 1800 })
+    },
+    setView,
+  })
+  panel.sync()
+  if (params.get('blocks') === 'wear') setView('wear')
+
   onThemeMode(() => {
     gfx.refreshEnvironment()
     document.documentElement.dataset.theme = themeMode()
@@ -278,9 +406,12 @@ async function boot(): Promise<void> {
   })
 
   window.addEventListener('keydown', (e) => {
-    if (e.target instanceof HTMLInputElement || e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.metaKey || e.ctrlKey || e.altKey) return
     const k = e.key.toLowerCase()
-    if (k === 'x') {
+    if (k === ' ') {
+      e.preventDefault()
+      playing = !playing
+    } else if (k === 'x') {
       const s = state.focusStack
       state.explodeTarget[s] = state.explodeTarget[s] > 0.05 ? 0 : 0.65
       if (state.explodeTarget[s] === 0) state.liftedDieTarget[s] = -1
@@ -292,6 +423,7 @@ async function boot(): Promise<void> {
     } else if (k === 'h') rig.setView(VIEW.home.target, VIEW.home.pos)
     else if (k === 'o') rig.setView(VIEW.overview.target, VIEW.overview.pos)
     else if (k === 'n') toggleThemeMode()
+    else if (k === 'w') setView(simView.mode === 'wear' ? 'state' : 'wear')
     else if (k === 'l') {
       state.labels = !state.labels
       hud.sync()
@@ -323,13 +455,11 @@ async function boot(): Promise<void> {
     if (def) {
       state.explode[state.focusStack] = state.explodeTarget[state.focusStack]
       stacks.update(0, state)
-      const f = focusFor(def)
-      rig.flyTo(f, 0.001)
+      rig.flyTo(focusFor(def), 0.001)
     }
   }
   const pFocus = params.get('focus')
   if (settleMode) {
-    // screenshot mode: jump animations to their targets
     for (let s = 0; s < N; s++) {
       state.explode[s] = state.explodeTarget[s]
       state.liftedDie[s] = state.liftedDieTarget[s]
@@ -337,12 +467,19 @@ async function boot(): Promise<void> {
     }
     stacks.update(0, state)
   }
-  if (pFocus && registry.get(pFocus)) {
-    const f = focusFor(registry.get(pFocus)!)
-    rig.flyTo(f, 0.001)
-  }
+  if (pFocus && registry.get(pFocus)) rig.flyTo(focusFor(registry.get(pFocus)!), 0.001)
 
-  ;(window as unknown as { HBFCITY: unknown }).HBFCITY = { state, registry, bus, rig, gfx, select, P }
+  ;(window as unknown as { HBFCITY: unknown }).HBFCITY = {
+    state,
+    registry,
+    bus,
+    rig,
+    gfx,
+    select,
+    get sim() {
+      return sim
+    },
+  }
 
   await progress(100, 'Ready')
   if (settleMode) document.getElementById('boot')?.remove()
@@ -353,12 +490,29 @@ async function boot(): Promise<void> {
 
   /* ---- loop ------------------------------------------------------------------ */
   let last = performance.now()
+  let lastPanel = 0
   function frame(now: number): void {
     const dt = Math.min(0.1, Math.max(0, (now - last) / 1000))
     last = now
     if (Math.abs(state.verticalScale - state.verticalScaleTarget) > 1e-3) {
       state.verticalScale = damp(state.verticalScale, state.verticalScaleTarget, 4, dt)
     } else state.verticalScale = state.verticalScaleTarget
+
+    const before = sim.now
+    if (playing) sim.step(dt, speed)
+    const simDt = sim.now - before
+    activity.update(sim, simDt, dt)
+    simView.update(sim.store, now)
+    stacks.setActivity(activity, dt)
+    pkg.setActivity(activity, dt)
+    let readAvg = 0
+    for (let i = 0; i < activity.read.length; i++) readAvg += activity.read[i]
+    gpu.setActivity(activity.compute, readAvg / activity.read.length)
+    if (now - lastPanel > 200) {
+      lastPanel = now
+      panel.update(sim, playing, speed, load, simView.wearRange)
+    }
+
     for (const m of modules) m.update(dt, state)
     rig.update(dt)
     picker.update()

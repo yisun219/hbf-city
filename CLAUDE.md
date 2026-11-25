@@ -5,7 +5,7 @@
 HBFCity is an explorable 3D city of a GPU package with High Bandwidth Flash
 (HBF) stacks, aimed at LLM serving. It is derived from PGSimCity
 (github.com/NikolayS/PGSimCity) and keeps its engineering rules in reduced
-form. Step 1 is structure only; step 2 adds a simulator.
+form. Step 1 built the structure; step 2 added the serving simulator.
 
 This repository is public. Implement only published mechanisms (OCP spec,
 HBFlex, FlashAccel, ...). Unpublished research policies stay out of it.
@@ -14,8 +14,10 @@ HBFlex, FlashAccel, ...). Unpublished research policies stay out of it.
 
 ```text
 src/core/     types (SceneState, ComponentDef), bus, registry, theme, hbf-spec
+src/sim/      models, workload, store (KV placement, policies), sim (serving loop)
 src/world/    layout.ts (single source of geography), package, gpu, hbf-stack,
-              die-material (floor-plan shader), occupancy (block atlas), sky
+              die-material (floor-plan shader), occupancy (block atlas),
+              sim-view (store -> atlas), activity, flow-material, sky
 src/engine/   renderer, camera, labels, picker
 src/ui/       hud, panel (inspector), content (sourced notes), dom
 ```
@@ -24,7 +26,11 @@ src/ui/       hud, panel (inspector), content (sourced notes), dom
   says where each one came from. Never hard-code a device number elsewhere.
 - `src/world/layout.ts` owns geography. Districts read positions from it.
 - World modules read `SceneState`; only the UI and `main.ts` write it.
-- The simulator, when added, must not import three.js.
+- `src/sim` must not import three.js. The world reads the simulator; it never
+  mutates it.
+- Every simulator number shown to the reader is simulated, and the UI says so.
+  Keep `store.check()` and the serving tests green: they guard the page and
+  erase accounting that the wear view depends on.
 
 ## Rules carried over from PGSimCity
 

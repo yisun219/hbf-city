@@ -1,9 +1,16 @@
 import * as THREE from 'three'
 import { HBF, THICKNESS_UM } from '../core/hbf-spec'
-import { signal, surface, themed } from '../core/theme'
+import { surface } from '../core/theme'
 import type { SceneState, WorldContext, WorldModule } from '../core/types'
 import { makeRng } from '../core/util'
 import { BASE_PLAN, C4_UM, GPU_DIE, INTERPOSER, STACK, STACK_SITES, SUBSTRATE, stackV, umToY } from './layout'
+import { addFlowAttributes, createFlowMaterial } from './flow-material'
+import type { Activity } from './activity'
+
+export interface PackageModule extends WorldModule {
+  /** drive the UCIe pulses from per-die activity; call every frame */
+  setActivity(activity: Activity, wallDt: number): void
+}
 
 /* ============================================================================
  * THE PACKAGE — the land the city stands on.
@@ -98,7 +105,7 @@ function solderMaskTexture(): THREE.CanvasTexture | null {
   return t
 }
 
-export function createPackage(ctx: WorldContext): WorldModule {
+export function createPackage(ctx: WorldContext): PackageModule {
   const group = new THREE.Group()
   group.name = 'package'
   const unit = new THREE.BoxGeometry(1, 1, 1)
@@ -180,7 +187,11 @@ export function createPackage(ctx: WorldContext): WorldModule {
 
   /* ---- UCIe lanes: one per host channel, GPU PHY to base-die PHY ------------- */
   const laneCount = HBF.stacksPerGpu * HBF.channelsPerStack
-  const lanes = new THREE.InstancedMesh(unit, signal({ color: 'link', glow: 0.95, nightBase: 0.3 }), laneCount)
+  // Pulses run toward the GPU: reads dominate HBF traffic by orders of magnitude.
+  const laneGeo = unit.clone()
+  const laneFlow = addFlowAttributes(laneGeo, laneCount, (i) => STACK_SITES[Math.floor(i / HBF.channelsPerStack)].inward).flow
+  const laneMat = createFlowMaterial({ base: 'link', pulse: 'tsv', axis: 'x', spacing: 7, speed: 30, nightBase: 0.35, dayGlow: 0.8 })
+  const lanes = new THREE.InstancedMesh(laneGeo, laneMat.material, laneCount)
   lanes.name = 'package.ucie'
   group.add(lanes)
   {
@@ -244,10 +255,6 @@ export function createPackage(ctx: WorldContext): WorldModule {
   }
   layout(ctx.state)
 
-  themed((_mode, p) => {
-    if (traces) ipTop.color.setHex(p.interposer)
-  })
-
   /* ---- components ------------------------------------------------------------ */
   ctx.register({
     id: 'package.interposer',
@@ -303,6 +310,12 @@ export function createPackage(ctx: WorldContext): WorldModule {
     group,
     update(_dt, state) {
       layout(state)
+    },
+    setActivity(act, wallDt) {
+      laneMat.tick(wallDt)
+      // lane c of a stack is host channel c, which owns core die c
+      for (let i = 0; i < laneCount; i++) laneFlow.setX(i, Math.min(1, act.read[i] + act.program[i]))
+      laneFlow.needsUpdate = true
     },
   }
 }

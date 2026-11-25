@@ -29,9 +29,9 @@ export interface Hud {
 
 const LEGEND: { key: keyof Palette; label: string }[] = [
   { key: 'weights', label: 'Weights' },
-  { key: 'kv', label: 'KV cache' },
-  { key: 'kvTail', label: 'Open KV block' },
-  { key: 'invalid', label: 'Invalid (awaiting erase)' },
+  { key: 'kv', label: 'KV, all pages valid' },
+  { key: 'kvTail', label: 'Open block (being written)' },
+  { key: 'invalid', label: 'KV, all pages invalid' },
   { key: 'free', label: 'Free (erased)' },
   { key: 'sram', label: 'SRAM' },
   { key: 'compute', label: 'Compute (SM)' },
@@ -54,7 +54,7 @@ export function createHud(root: HTMLElement, state: SceneState, bus: Bus, act: H
   const trustList = el('ul', {})
   for (const t of TRUST_NOTES) trustList.append(el('li', {}, t))
   trust.append(el('h3', {}, 'How much to trust this'), trustList)
-  const trustBtn = el('button', { type: 'button', class: 'chip chip--honest' }, 'Model · block states illustrative')
+  const trustBtn = el('button', { type: 'button', class: 'chip chip--honest' }, 'Model · how much to trust this')
   trustBtn.addEventListener('click', () => {
     trust.hidden = !trust.hidden
   })
@@ -111,7 +111,7 @@ export function createHud(root: HTMLElement, state: SceneState, bus: Bus, act: H
     el('div', { class: 'dock__head' }, dockTitle, openAll),
     mini,
     el('label', { class: 'dock__row' }, el('span', { class: 'dock__lab' }, 'Open stack'), slider, sliderVal),
-    el('p', { class: 'dock__hint' }, 'Click a core die to lift the dies above it.'),
+    el('p', { class: 'dock__hint' }, 'Click a core die to slide it out. Drag to pan, Shift-drag to orbit, scroll to zoom.'),
   )
   root.append(dock)
 
@@ -125,9 +125,6 @@ export function createHud(root: HTMLElement, state: SceneState, bus: Bus, act: H
   }
   root.append(legend)
 
-  root.append(
-    el('p', { class: 'hint' }, 'Drag to pan · Shift-drag or right-drag to orbit · Scroll to zoom · Double-click to focus · X opens the selected stack'),
-  )
 
   function sync(): void {
     const night = themeMode() === 'night'

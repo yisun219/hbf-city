@@ -18,7 +18,7 @@
  *             scheduler/controller/SRAM)
  * ==========================================================================*/
 
-export type SourceKey = 'OCP' | 'HBFLEX' | 'SANDISK' | 'FLASHACC' | 'HBFSUCKS' | 'DASH' | 'GH100'
+export type SourceKey = 'OCP' | 'HBFLEX' | 'SANDISK' | 'FLASHACC' | 'HBFSUCKS' | 'DASH' | 'GH100' | 'BAILIAN'
 
 export interface SourceRef {
   key: SourceKey
@@ -38,6 +38,10 @@ export const SOURCES: Record<SourceKey, SourceRef> = {
   HBFSUCKS: { key: 'HBFSUCKS', label: '"HBF Sucks!", arXiv 2608.11668', url: 'https://arxiv.org/abs/2608.11668' },
   DASH: { key: 'DASH', label: 'DASH, arXiv 2608.14333', url: 'https://arxiv.org/abs/2608.14333' },
   GH100: { key: 'GH100', label: 'NVIDIA H100 Tensor Core GPU Architecture whitepaper (GH100)' },
+  BAILIAN: {
+    key: 'BAILIAN',
+    label: 'Wang et al., "KVCache Cache in the Wild", USENIX ATC 2025 (Qwen-Bailian usage traces)',
+  },
 }
 
 /* ---------------------------------------------------------------------------
@@ -65,6 +69,8 @@ export const HBF = {
   programUs: 75,
   /** SLC endurance assumed by HBFlex and FlashAccel §2.3. */
   peCycles: 100_000,
+  /** estimate: block erase time, typical of SLC NAND */
+  eraseUs: 1_500,
   /** HBFlex: 40 MiB of base-die SRAM per stack. */
   baseDieSramMiB: 40,
   /** OCP §10.3: approximate footprint and nominal height. */
@@ -100,6 +106,9 @@ export const THICKNESS_UM = {
 /* ---------------------------------------------------------------------------
  * The GPU (GH100-class; the floor plan is approximate, not a die photo).
  * -------------------------------------------------------------------------*/
+
+/** H200 dense FP8 tensor throughput (NVIDIA datasheet) and an assumed utilisation. */
+export const GPU_COMPUTE = { fp8Flops: 1979e12, utilisation: 0.5 } as const
 
 export const GPU = {
   /** Reticle-class die, approximately GH100's 814 mm². */

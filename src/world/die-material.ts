@@ -27,6 +27,8 @@ const f = (x: number): string => x.toFixed(5)
 
 const FRAGMENT_DECLS = /* glsl */ `
 uniform sampler2D uOcc;
+uniform sampler2D uAct;
+uniform vec3 uErase;
 uniform vec3 uTop;
 uniform vec3 uSilicon;
 uniform vec3 uSeal;
@@ -83,6 +85,8 @@ void hbfPlan(inout vec3 albedo, inout vec3 emis, inout float rough, inout float 
   float wu = max(fwidth(u), 1e-5);
   float wv = max(fwidth(v), 1e-5);
   bool selected = abs(vHbfDie - uSelDie) < 0.5;
+  // per-die activity: r = read utilisation, g = program, b = erase
+  vec4 act = texture(uAct, vec2((vHbfDie + 0.5) / ${f(96)}, 0.5));
 
   albedo = uTop;
   rough = 0.52;
@@ -92,6 +96,8 @@ void hbfPlan(inout vec3 albedo, inout vec3 emis, inout float rough, inout float 
   float inner = hbfBand(HBF_SEAL, 1.0 - HBF_SEAL, u, wu) * hbfBand(HBF_SEAL, 1.0 - HBF_SEAL, v, wv);
   albedo = mix(uSeal, albedo, inner);
   if (selected) emis += uTsv * (1.0 - inner) * (0.35 + 0.65 * uNight) * 1.4;
+  // erases flash the seal ring
+  emis += uErase * (1.0 - inner) * act.b * (0.4 + 0.8 * uNight);
 
   // Power-TSV rows along both long edges.
   float inU = hbfBand(HBF_PU0, HBF_PU1, u, wu);
@@ -123,7 +129,8 @@ void hbfPlan(inout vec3 albedo, inout vec3 emis, inout float rough, inout float 
     float k = mix(dotv, 0.2, far);
     vec3 strip = mix(uTop * 0.6, mix(uCopper, uTsv, 0.55 + 0.45 * uNight), k);
     albedo = mix(albedo, strip, spine);
-    emis += uTsv * uGlow * 0.5 * spine * k;
+    // the strip carries every read and program to and from the base die
+    emis += uTsv * (uGlow * 0.45 + (0.3 + 0.6 * uNight) * (act.r * 0.45 + act.g)) * spine * k;
     metal = mix(metal, 0.75, spine * k);
   }
 
@@ -171,6 +178,9 @@ void hbfPlan(inout vec3 albedo, inout vec3 emis, inout float rough, inout float 
     vec3 arrayAlb = mix(cellDay, cellNight, uNight);
     vec3 arrayEmis = occ.rgb * occ.a * uGlow * (1.0 - 0.75 * s);
     if (selected) arrayEmis *= 1.25;
+    // planes being sensed shimmer faintly with the die's read utilisation
+    arrayEmis += uTsv * act.r * 0.07 * uNight;
+    arrayAlb = mix(arrayAlb, vec3(1.0), act.r * 0.06 * (1.0 - uNight));
 
     // Plane outline.
     float edgeU = min(ap, 1.0 - ap) / max(wap, 1e-5);
@@ -193,9 +203,11 @@ export interface CoreDieMaterial {
   setSelectedDie(global: number): void
 }
 
-export function createCoreDieMaterial(occupancy: THREE.Texture): CoreDieMaterial {
+export function createCoreDieMaterial(occupancy: THREE.Texture, activity: THREE.Texture): CoreDieMaterial {
   const uniforms = {
     uOcc: { value: occupancy },
+    uAct: { value: activity },
+    uErase: { value: new THREE.Color() },
     uTop: { value: new THREE.Color() },
     uSilicon: { value: new THREE.Color() },
     uSeal: { value: new THREE.Color() },
@@ -207,7 +219,7 @@ export function createCoreDieMaterial(occupancy: THREE.Texture): CoreDieMaterial
   }
   const material = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.3 })
   material.name = 'hbfcity.coreDie'
-  material.customProgramCacheKey = () => 'hbfcity.coreDie.v1'
+  material.customProgramCacheKey = () => 'hbfcity.coreDie.v2'
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms)
     shader.vertexShader = shader.vertexShader
@@ -254,6 +266,7 @@ vHbfFlip = aFlip;`,
     uniforms.uSeal.value.setHex(p.seal)
     uniforms.uCopper.value.setHex(p.copper)
     uniforms.uTsv.value.setHex(p.tsv)
+    uniforms.uErase.value.setHex(p.invalid)
     uniforms.uGlow.value = air.glow
     uniforms.uNight.value = mode === 'night' ? 1 : 0
   })

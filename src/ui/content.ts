@@ -238,7 +238,7 @@ export const DOCS: Record<string, ComponentDoc> = {
     ],
     caveats: [
       'Real HBF die floor plans are not public. This one follows published diagrams (FlashAccel Fig. 6c, “HBF Sucks” Fig. 2).',
-      'Block colours are illustrative until the simulator is connected.',
+      'Block colours come from the serving simulator. It programs a block index on all 32 planes of a die together, so the planes of one die always look alike.',
       'OCP Table 3 counts 16 banks per channel; this city uses HBFlex’s 32 planes per die. One host channel per die follows OCP §4.3; OCP Fig. 4 shows a channel spanning four dies instead.',
     ],
     sources: [
@@ -411,8 +411,9 @@ export function docFor(key: string): ComponentDoc | undefined {
 export const TRUST_NOTES: readonly string[] = [
   'This is a model, not a die photo. HBF floor plans inside the stack are not public; they follow published diagrams.',
   'Heights are exaggerated 12× by default (toolbar: true proportions). Circuit blocks are raised for legibility.',
-  'Opening a stack and lifting a die are viewing aids; bonded dies sit microns apart.',
-  'Block colours are illustrative. No simulator drives them yet.',
+  'Opening a stack and sliding a die out are viewing aids; bonded dies sit microns apart.',
+  'Block colours come from a serving simulator, not a measurement. Requests are synthetic, drawn from published statistics of the Qwen-Bailian traces.',
+  'The simulator allocates a block index on all 32 planes of a die together (OCP §11.2.2), so its blocks are coarser than HBFlex’s per-plane blocks and its write amplification differs from HBFlex’s published numbers.',
+  'Iteration time is the slowest of compute and each interleave domain’s reads, programs and leftover GC work; routing assumes uniform expert selection.',
   'The GPU is drawn active side up; on a real package it faces down onto the interposer.',
-  'Gaps between dies on the interposer are widened slightly; mold compound is not drawn.',
 ]

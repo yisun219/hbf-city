@@ -28,6 +28,8 @@ import { BASE_PLAN, GPU_DIE, GPU_PLAN, MM, STACK, STACK_SITES, gpuHeight, stackV
 
 export interface GpuModule extends WorldModule {
   ghost: THREE.Mesh
+  /** compute share and memory-read utilisation, 0..1, drive SM and L2 glow */
+  setActivity(compute: number, read: number): void
 }
 
 const HX = GPU_DIE.width / 2
@@ -75,7 +77,8 @@ export function createGpu(ctx: WorldContext): GpuModule {
   while (disabled.size < totalSms - GPU.enabledSms) disabled.add(Math.floor(rng() * totalSms))
 
   const smBody = new THREE.InstancedMesh(unit, surface({ color: 'computeDim', roughness: 0.55, metalness: 0.25, nightRoughness: 0.6 }), totalSms)
-  const smRoof = new THREE.InstancedMesh(unit, signal({ color: 'compute', glow: 0.42, nightBase: 0.3 }), GPU.enabledSms)
+  const roofMat = signal({ color: 'compute', glow: 0.42, nightBase: 0.3 })
+  const smRoof = new THREE.InstancedMesh(unit, roofMat, GPU.enabledSms)
   const smOff = new THREE.InstancedMesh(unit, surface({ color: 'computeDim', roughness: 0.7 }), totalSms - GPU.enabledSms)
   const tensor = new THREE.InstancedMesh(unit, signal({ color: 'tensor', glow: 0.5, nightBase: 0.3 }), GPU.enabledSms * 4)
   const l1 = new THREE.InstancedMesh(unit, signal({ color: 'sram', glow: 0.32 }), GPU.enabledSms)
@@ -135,7 +138,8 @@ export function createGpu(ctx: WorldContext): GpuModule {
   /* ---- L2 and crossbar ---------------------------------------------------- */
   const l2Cols = 10
   const l2Rows = 3
-  const l2 = new THREE.InstancedMesh(unit, signal({ color: 'sram', glow: 0.3 }), 2 * l2Cols * l2Rows)
+  const l2Mat = signal({ color: 'sram', glow: 0.3 })
+  const l2 = new THREE.InstancedMesh(unit, l2Mat, 2 * l2Cols * l2Rows)
   let li = 0
   for (let half = 0; half < 2; half++) {
     const xa = half === 0 ? -inner : 6
@@ -341,12 +345,24 @@ export function createGpu(ctx: WorldContext): GpuModule {
     color: 0x6e8dff,
   })
 
+  // Activity scales the themed glow; capture the themed values each frame.
+  let roofBase = roofMat.emissiveIntensity
+  let l2Base = l2Mat.emissiveIntensity
+  themed(() => {
+    roofBase = roofMat.emissiveIntensity
+    l2Base = l2Mat.emissiveIntensity
+  })
+
   return {
     id: 'gpu',
     group,
     ghost,
     update(_dt, state) {
       layoutGhost(state)
+    },
+    setActivity(compute, read) {
+      roofMat.emissiveIntensity = roofBase * (0.35 + 1.1 * compute)
+      l2Mat.emissiveIntensity = l2Base * (0.4 + 1.2 * read)
     },
   }
 }

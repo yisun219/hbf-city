@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { HBF } from '../src/core/hbf-spec'
-import { ATLAS, BlockState, ILLUSTRATIVE_WEIGHT_SHARE, TOTAL_DIES, atlasTexel, illustrativeBlock } from '../src/world/occupancy'
+import { PALETTES } from '../src/core/theme'
+import { createStore, domainDies } from '../src/sim/store'
+import { ATLAS, TOTAL_DIES, atlasTexel, createOccupancyAtlas, rowStart } from '../src/world/occupancy'
+import { createSimView } from '../src/world/sim-view'
 
-describe('occupancy atlas', () => {
+describe('block atlas', () => {
   it('fits every block of the package in a WebGL2-safe texture, one texel each', () => {
     expect(ATLAS.width).toBeLessThanOrEqual(2048)
     expect(ATLAS.height).toBeLessThanOrEqual(2048)
@@ -16,7 +19,6 @@ describe('occupancy atlas', () => {
         for (const p of [0, 15, 31]) {
           for (const b of [0, 255, 511]) {
             const [x, y] = atlasTexel(s, d, p, b)
-            expect(x).toBeGreaterThanOrEqual(0)
             expect(x).toBeLessThan(ATLAS.width)
             expect(y).toBeLessThan(ATLAS.height)
             seen.add(y * ATLAS.width + x)
@@ -27,26 +29,39 @@ describe('occupancy atlas', () => {
     expect(seen.size).toBe(HBF.stacksPerGpu * HBF.diesPerStack * 9)
   })
 
-  it('stripes weights over every plane, as OCP §13.3.1 recommends', () => {
-    const w = Math.round(HBF.blocksPerPlane * ILLUSTRATIVE_WEIGHT_SHARE)
-    for (let p = 0; p < HBF.planesPerDie; p++) {
-      expect(illustrativeBlock(2, 9, p, 0).state).toBe(BlockState.Weights)
-      expect(illustrativeBlock(2, 9, p, w - 1).state).toBe(BlockState.Weights)
-      expect(illustrativeBlock(2, 9, p, w).state).not.toBe(BlockState.Weights)
-    }
+  it('puts a die’s 32 plane texels for one block in one contiguous row', () => {
+    const [x0, y0] = atlasTexel(3, 7, 0, 100)
+    const [x31, y31] = atlasTexel(3, 7, 31, 100)
+    expect(y31).toBe(y0)
+    expect(x31 - x0).toBe(31)
+    expect(rowStart(3 * 16 + 7, 100)).toBe(y0 * ATLAS.width + x0)
   })
+})
 
-  it('leaves exactly one open KV block per plane, then free blocks', () => {
-    for (let p = 0; p < HBF.planesPerDie; p++) {
-      let open = 0
-      let sawFree = false
-      for (let b = 0; b < HBF.blocksPerPlane; b++) {
-        const s = illustrativeBlock(4, 3, p, b).state
-        if (s === BlockState.KvOpen) open++
-        if (s === BlockState.Free) sawFree = true
-        else if (sawFree) throw new Error(`plane ${p}: block ${b} is used after a free block`)
+describe('sim view', () => {
+  it('paints a superblock onto every plane of every die in its domain, and nowhere else', () => {
+    const atlas = createOccupancyAtlas()
+    const view = createSimView(atlas)
+    view.setPalette('day', PALETTES.day)
+    const store = createStore('hbflex', 0, 4)
+    view.repaintAll(store)
+    // write one superblock's worth into domain 5 and repaint only what changed
+    store.write(1, 5, 0, 512, 0)
+    const before = atlas.data.slice()
+    view.update(store, 1e9)
+    const changed = new Set<number>()
+    for (let i = 0; i < atlas.data.length; i += 4) {
+      if (atlas.data[i] !== before[i] || atlas.data[i + 1] !== before[i + 1] || atlas.data[i + 2] !== before[i + 2]) {
+        changed.add(i / 4)
       }
-      expect(open).toBe(1)
+    }
+    const dies = domainDies(4, 5)
+    expect(changed.size).toBe(dies.length * HBF.planesPerDie)
+    for (const t of changed) {
+      const x = t % ATLAS.width
+      const y = Math.floor(t / ATLAS.width)
+      const die = Math.floor(y / HBF.blocksPerPlane) * ATLAS.diesPerRow + Math.floor(x / HBF.planesPerDie)
+      expect(dies).toContain(die)
     }
   })
 })

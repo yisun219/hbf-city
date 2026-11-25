@@ -4,6 +4,8 @@ import { signal, surface } from '../core/theme'
 import type { SceneState, WorldContext, WorldModule } from '../core/types'
 import { clamp, damp } from '../core/util'
 import { createCoreDieMaterial } from './die-material'
+import { addFlowAttributes, createFlowMaterial } from './flow-material'
+import type { Activity } from './activity'
 import {
   BASE_PLAN,
   DIE_PLAN,
@@ -44,6 +46,8 @@ export interface StacksModule extends WorldModule {
   coreDies: THREE.InstancedMesh
   baseDies: THREE.InstancedMesh
   setSelectedDie(stack: number, die: number): void
+  /** drive TSV pulses from per-die activity; call every frame */
+  setActivity(activity: Activity, wallDt: number): void
 }
 
 const N_DIES = HBF.diesPerStack
@@ -146,7 +150,7 @@ function baseBlocks(site: StackSite): Record<'phy' | 'ctrl' | 'sram' | 'landing'
   return out
 }
 
-export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas): StacksModule {
+export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas, activity: Activity): StacksModule {
   const group = new THREE.Group()
   group.name = 'stacks'
   const unit = new THREE.BoxGeometry(1, 1, 1)
@@ -190,7 +194,7 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas): Stac
   }
   dieGeo.setAttribute('aDie', new THREE.InstancedBufferAttribute(aDie, 1))
   dieGeo.setAttribute('aFlip', new THREE.InstancedBufferAttribute(aFlip, 1))
-  const coreMat = createCoreDieMaterial(occupancy.texture)
+  const coreMat = createCoreDieMaterial(occupancy.texture, activity.texture)
   const coreDies = new THREE.InstancedMesh(dieGeo, coreMat.material, N_STACKS * N_DIES)
   coreDies.name = 'stacks.core'
   group.add(coreDies)
@@ -201,7 +205,11 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas): Stac
 
   /* ---- TSV columns ------------------------------------------------------ */
   const col = new THREE.CylinderGeometry(0.5, 0.5, 1, 10, 1, false)
-  const sigTsv = new THREE.InstancedMesh(col, signal({ color: 'tsv', glow: 0.32, nightBase: 0.5, metalness: 0.6, roughness: 0.35 }), N_STACKS * SIG_COLS * 2)
+  // Signal TSVs carry reads down to the base die: pulses run downward.
+  const sigGeo = col.clone()
+  const tsvFlow = addFlowAttributes(sigGeo, N_STACKS * SIG_COLS * 2, () => -1).flow
+  const tsvMat = createFlowMaterial({ base: 'tsv', pulse: 'tsv', axis: 'y', spacing: 9, speed: 26, nightBase: 0.45, dayGlow: 0.7 })
+  const sigTsv = new THREE.InstancedMesh(sigGeo, tsvMat.material, N_STACKS * SIG_COLS * 2)
   const pwrTsv = new THREE.InstancedMesh(col, surface({ color: 'copper', roughness: 0.28, metalness: 0.95 }), N_STACKS * PWR_COLS * 2)
   sigTsv.name = 'stacks.tsv.signal'
   pwrTsv.name = 'stacks.tsv.power'
@@ -454,6 +462,16 @@ export function createStacks(ctx: WorldContext, occupancy: OccupancyAtlas): Stac
     update,
     setSelectedDie(stack: number, die: number) {
       coreMat.setSelectedDie(stack < 0 || die < 0 ? -1 : stack * N_DIES + die)
+    },
+    setActivity(act, wallDt) {
+      tsvMat.tick(wallDt)
+      for (let s = 0; s < N_STACKS; s++) {
+        let v = 0
+        for (let d = 0; d < N_DIES; d++) v += act.read[s * N_DIES + d] + act.program[s * N_DIES + d]
+        v /= N_DIES
+        for (let j = 0; j < SIG_COLS * 2; j++) tsvFlow.setX(s * SIG_COLS * 2 + j, v)
+      }
+      tsvFlow.needsUpdate = true
     },
   }
 }
